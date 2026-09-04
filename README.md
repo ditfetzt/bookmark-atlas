@@ -74,7 +74,7 @@ The versioned 20-query retrieval benchmark currently favors FTS5 over the tested
 
 The snapshot protocol builds a consistent standalone SQLite artifact, verifies it with SHA-256 and `integrity_check`, and activates it atomically for read-only agent search. See [the snapshot spike](./docs/spikes/snapshot-protocol.md).
 
-The universal read-only agent API runs locally on port 4180:
+The universal read-only agent API is available locally and, when the dashboard is deployed, under the same VPN domain at `/v1/*`:
 
 ```bash
 BOOKMARK_ATLAS_AGENT_TOKEN="change-me" node src/cli.ts agent-api
