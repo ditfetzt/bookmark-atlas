@@ -76,4 +76,6 @@ For local X collection, install TweetXVault separately and authenticate it in th
 
 As a browser-based fallback, `capture x` starts a loopback-only receiver on `127.0.0.1:41009`. A userscript or local browser helper can POST to `/session/start`, `/session/batch`, and `/session/complete` with the `X-Bookmark-Atlas-Session-Token` header. The token is read only from `BOOKMARK_ATLAS_X_CAPTURE_TOKEN`; cookies are not accepted by the receiver. The receiver has an 8 MiB request limit and accepts X origins only.
 
+The first browser bridge is [scripts/x-bookmark-capture.user.js](./scripts/x-bookmark-capture.user.js). Install it in Tampermonkey or Violentmonkey, start `capture x`, open X's Bookmarks/History view, and scroll until the desired range has loaded. The script extracts only native tweet objects from already-loaded JSON responses, deduplicates by tweet ID, and sends batches to localhost. It does not read cookies or page storage.
+
 See [PRD.md](./PRD.md) and [PRD-REVIEW.md](./PRD-REVIEW.md) for the reviewed product and architecture decisions.
