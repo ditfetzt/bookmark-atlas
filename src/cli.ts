@@ -9,6 +9,7 @@ import { buildSnapshot, installSnapshot } from "./snapshot.ts";
 import { collectXBookmarks } from "./collector.ts";
 import { startXCaptureServer } from "./receiver.ts";
 import { startDashboardServer } from "./dashboard.ts";
+import { startAgentApiServer } from "./agent-api.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -35,6 +36,7 @@ Usage:
   bookmark-atlas collect x [--account NAME] [--full] [--keep-export]
   bookmark-atlas capture x [--port N]
   bookmark-atlas dashboard [--port N]
+  bookmark-atlas agent-api [--port N]
   bookmark-atlas benchmark retrieval [--cases FILE]
   bookmark-atlas snapshot build <output> [--version N]
   bookmark-atlas snapshot install <source> <manifest> <destination>
@@ -49,6 +51,7 @@ Environment:
   BOOKMARK_ATLAS_GITHUB_TOKEN   GitHub token (falls back to GH_TOKEN or gh auth token)
   BOOKMARK_ATLAS_TWEETXVAULT_BIN TweetXVault executable (default: tweetxvault)
   BOOKMARK_ATLAS_X_CAPTURE_TOKEN Required token for local browser capture receiver
+  BOOKMARK_ATLAS_AGENT_TOKEN    Optional Bearer token for the read-only agent API
 `);
 }
 
@@ -107,6 +110,21 @@ async function main(): Promise<void> {
       console.log(JSON.stringify({ listening: dashboard.address }, null, 2));
       await new Promise<void>((resolve, reject) => {
         const stop = () => dashboard.close().then(resolve, reject);
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
+      });
+      return;
+    }
+
+    if (command === "agent-api") {
+      const rawPort = optionValue(args, "--port");
+      const port = rawPort ? Number.parseInt(rawPort, 10) : 4180;
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("--port must be between 1 and 65535");
+      const token = process.env.BOOKMARK_ATLAS_AGENT_TOKEN;
+      const api = await startAgentApiServer(db, { port, ...(token ? { token } : {}) });
+      console.log(JSON.stringify({ listening: api.address, endpoints: ["/v1/health", "/v1/search?q=...", "/v1/recent", "/v1/resources/:id", "/v1/resources/:id/related"] }, null, 2));
+      await new Promise<void>((resolve, reject) => {
+        const stop = () => api.close().then(resolve, reject);
         process.once("SIGINT", stop);
         process.once("SIGTERM", stop);
       });

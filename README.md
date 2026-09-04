@@ -39,6 +39,7 @@ node src/cli.ts collect x
 node src/cli.ts collect x --full
 BOOKMARK_ATLAS_X_CAPTURE_TOKEN="change-me" node src/cli.ts capture x
 node src/cli.ts dashboard
+node src/cli.ts agent-api
 npm run benchmark:retrieval
 npm run snapshot:build -- ./dist/bookmarks.db --version 1
 node src/cli.ts snapshot install ./dist/bookmarks.db ./dist/bookmarks.db.manifest.json ./data/replica.db
@@ -72,6 +73,17 @@ The X importer accepts Siftly native captures, Siftly normalized exports, and in
 The versioned 20-query retrieval benchmark currently favors FTS5 over the tested local macOS embedding model. See [the retrieval benchmark](./docs/spikes/retrieval-benchmark.md) for metrics, methodology, and limitations.
 
 The snapshot protocol builds a consistent standalone SQLite artifact, verifies it with SHA-256 and `integrity_check`, and activates it atomically for read-only agent search. See [the snapshot spike](./docs/spikes/snapshot-protocol.md).
+
+The universal read-only agent API runs locally on port 4180:
+
+```bash
+BOOKMARK_ATLAS_AGENT_TOKEN="change-me" node src/cli.ts agent-api
+curl -H "Authorization: Bearer change-me" 'http://127.0.0.1:4180/v1/search?q=agent&limit=5'
+curl -H "Authorization: Bearer change-me" http://127.0.0.1:4180/v1/recent
+curl -H "Authorization: Bearer change-me" http://127.0.0.1:4180/v1/resources/1/related
+```
+
+Endpoints are read-only and return JSON with the explicit `untrusted_external_content` trust boundary. The API is suitable for any agent harness that can make HTTP GET requests; keep it on loopback or behind the VPN when exposing it remotely.
 
 For local X collection, install TweetXVault separately and authenticate it in the browser-backed local environment. `collect x` runs `tweetxvault sync bookmarks`, exports the bookmarks JSON into a temporary directory, imports it, and removes the temporary directory. Use `--keep-export` only for debugging. The collector should run on the logged-in Mac, not on the VPS; browser session cookies are never passed to Bookmark Atlas.
 
