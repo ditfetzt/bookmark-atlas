@@ -7,6 +7,7 @@ import { importXJsonFile } from "./x.ts";
 import { runRetrievalBenchmark } from "./benchmark.ts";
 import { buildSnapshot, installSnapshot } from "./snapshot.ts";
 import { collectXBookmarks } from "./collector.ts";
+import { startXCaptureServer } from "./receiver.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -31,6 +32,7 @@ Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
   bookmark-atlas import x-json <file> [--account NAME]
   bookmark-atlas collect x [--account NAME] [--full] [--keep-export]
+  bookmark-atlas capture x [--port N]
   bookmark-atlas benchmark retrieval [--cases FILE]
   bookmark-atlas snapshot build <output> [--version N]
   bookmark-atlas snapshot install <source> <manifest> <destination>
@@ -44,6 +46,7 @@ Environment:
   BOOKMARK_ATLAS_DB             SQLite path (default: ./data/bookmarks.db)
   BOOKMARK_ATLAS_GITHUB_TOKEN   GitHub token (falls back to GH_TOKEN or gh auth token)
   BOOKMARK_ATLAS_TWEETXVAULT_BIN TweetXVault executable (default: tweetxvault)
+  BOOKMARK_ATLAS_X_CAPTURE_TOKEN Required token for local browser capture receiver
 `);
 }
 
@@ -75,6 +78,22 @@ async function main(): Promise<void> {
         keepExport: args.includes("--keep-export"),
       });
       console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (command === "capture" && args[1] === "x") {
+      const token = process.env.BOOKMARK_ATLAS_X_CAPTURE_TOKEN;
+      if (!token) throw new Error("Set BOOKMARK_ATLAS_X_CAPTURE_TOKEN before starting capture x");
+      const rawPort = optionValue(args, "--port");
+      const port = rawPort ? Number.parseInt(rawPort, 10) : 41009;
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("--port must be between 1 and 65535");
+      const capture = await startXCaptureServer({ db, token, port });
+      console.log(JSON.stringify({ listening: capture.address, endpoints: ["/session/start", "/session/batch", "/session/complete"] }, null, 2));
+      await new Promise<void>((resolve, reject) => {
+        const stop = () => capture.close().then(resolve, reject);
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
+      });
       return;
     }
 

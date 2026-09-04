@@ -37,6 +37,7 @@ npm run enrich:github -- --limit 25
 npm run import:x -- ./bookmarks.json
 node src/cli.ts collect x
 node src/cli.ts collect x --full
+BOOKMARK_ATLAS_X_CAPTURE_TOKEN="change-me" node src/cli.ts capture x
 npm run benchmark:retrieval
 npm run snapshot:build -- ./dist/bookmarks.db --version 1
 node src/cli.ts snapshot install ./dist/bookmarks.db ./dist/bookmarks.db.manifest.json ./data/replica.db
@@ -72,5 +73,7 @@ The versioned 20-query retrieval benchmark currently favors FTS5 over the tested
 The snapshot protocol builds a consistent standalone SQLite artifact, verifies it with SHA-256 and `integrity_check`, and activates it atomically for read-only agent search. See [the snapshot spike](./docs/spikes/snapshot-protocol.md).
 
 For local X collection, install TweetXVault separately and authenticate it in the browser-backed local environment. `collect x` runs `tweetxvault sync bookmarks`, exports the bookmarks JSON into a temporary directory, imports it, and removes the temporary directory. Use `--keep-export` only for debugging. The collector should run on the logged-in Mac, not on the VPS; browser session cookies are never passed to Bookmark Atlas.
+
+As a browser-based fallback, `capture x` starts a loopback-only receiver on `127.0.0.1:41009`. A userscript or local browser helper can POST to `/session/start`, `/session/batch`, and `/session/complete` with the `X-Bookmark-Atlas-Session-Token` header. The token is read only from `BOOKMARK_ATLAS_X_CAPTURE_TOKEN`; cookies are not accepted by the receiver. The receiver has an 8 MiB request limit and accepts X origins only.
 
 See [PRD.md](./PRD.md) and [PRD-REVIEW.md](./PRD-REVIEW.md) for the reviewed product and architecture decisions.
