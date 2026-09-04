@@ -1,8 +1,4 @@
 data/
-*.db
-*.db-shm
-*.db-wal
-.env
-.DS_Store
+dist/
 node_modules/
-coverage/
+.DS_Store

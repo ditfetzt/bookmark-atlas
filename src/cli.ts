@@ -106,7 +106,7 @@ async function main(): Promise<void> {
       const rawPort = optionValue(args, "--port");
       const port = rawPort ? Number.parseInt(rawPort, 10) : 4173;
       if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("--port must be between 1 and 65535");
-      const dashboard = await startDashboardServer(db, { port });
+      const dashboard = await startDashboardServer(db, { port, host: process.env.BOOKMARK_ATLAS_HOST ?? "127.0.0.1" });
       console.log(JSON.stringify({ listening: dashboard.address }, null, 2));
       await new Promise<void>((resolve, reject) => {
         const stop = () => dashboard.close().then(resolve, reject);
@@ -121,7 +121,7 @@ async function main(): Promise<void> {
       const port = rawPort ? Number.parseInt(rawPort, 10) : 4180;
       if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("--port must be between 1 and 65535");
       const token = process.env.BOOKMARK_ATLAS_AGENT_TOKEN;
-      const api = await startAgentApiServer(db, { port, ...(token ? { token } : {}) });
+      const api = await startAgentApiServer(db, { port, host: process.env.BOOKMARK_ATLAS_HOST ?? "127.0.0.1", ...(token ? { token } : {}) });
       console.log(JSON.stringify({ listening: api.address, endpoints: ["/v1/health", "/v1/search?q=...", "/v1/recent", "/v1/resources/:id", "/v1/resources/:id/related"] }, null, 2));
       await new Promise<void>((resolve, reject) => {
         const stop = () => api.close().then(resolve, reject);
