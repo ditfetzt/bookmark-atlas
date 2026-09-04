@@ -212,6 +212,8 @@ function normalizeTweetXVault(value: unknown): NormalizedPost | null {
     ? mediaValue.map(object).filter((item): item is JsonObject => item !== null)
     : [];
   const raw = jsonObject(bookmark.raw_json) ?? bookmark;
+  const rawLegacy = object(raw?.legacy);
+  const text = string(bookmark.text) ?? string(bookmark.full_text) ?? string(bookmark.content) ?? string(rawLegacy?.full_text) ?? "";
   const urlValues = [bookmark.urls, bookmark.outbound_urls, bookmark.outboundUrls]
     .flatMap((value) => Array.isArray(value) ? value : [value]);
   const outboundUrls = uniqueStrings(urlValues.flatMap((value) => {
@@ -220,10 +222,10 @@ function normalizeTweetXVault(value: unknown): NormalizedPost | null {
   }));
   return {
     id,
-    text: string(bookmark.text) ?? string(bookmark.full_text) ?? string(bookmark.content) ?? "",
+    text,
     authorId: string(bookmark.author_id) ?? string(bookmark.authorId),
-    authorHandle: string(bookmark.author_username) ?? string(bookmark.author_handle) ?? string(bookmark.authorHandle),
-    authorName: string(bookmark.author_display_name) ?? string(bookmark.author_name) ?? string(bookmark.authorName),
+    authorHandle: string(bookmark.author_username) ?? string(bookmark.author_handle) ?? string(bookmark.authorHandle) ?? string(rawLegacy?.screen_name),
+    authorName: string(bookmark.author_display_name) ?? string(bookmark.author_name) ?? string(bookmark.authorName) ?? string(rawLegacy?.name),
     language: string(bookmark.lang) ?? string(bookmark.language),
     postCreatedAt: validDate(bookmark.created_at) ?? validDate(bookmark.post_created_at) ?? validDate(bookmark.tweetCreatedAt),
     savedAt: validDate(bookmark.added_at) ?? validDate(bookmark.captured_at) ?? validDate(bookmark.saved_at) ?? validDate(bookmark.importedAt),
@@ -345,6 +347,11 @@ function title(post: NormalizedPost): string {
   return `${prefix}${oneLine || post.id}`.slice(0, 240);
 }
 
+function description(post: NormalizedPost): string {
+  if (post.text.trim()) return post.text.slice(0, 2_000);
+  return "Posttext wurde von X in diesem Browser-Capture nicht mitgeliefert. Der Original-Post ist über den Link erreichbar.";
+}
+
 function canonicalUrl(post: NormalizedPost): string {
   return `https://x.com/i/web/status/${post.id}`;
 }
@@ -362,14 +369,14 @@ function importPost(db: AtlasDatabase, integrationId: number, post: NormalizedPo
     db.prepare(`
       UPDATE resources SET canonical_url = ?, title = ?, author = ?, description = ?,
         language = ?, availability_status = 'available', updated_at = ? WHERE id = ?
-    `).run(url, title(post), post.authorHandle ?? post.authorName, post.text.slice(0, 2_000), post.language, now, resourceId);
+    `).run(url, title(post), post.authorHandle ?? post.authorName, description(post), post.language, now, resourceId);
   } else {
     db.prepare(`
       INSERT INTO resources (
         canonical_url, resource_type, title, author, description, language,
         availability_status, created_at, updated_at
       ) VALUES (?, 'x_post', ?, ?, ?, ?, 'available', ?, ?)
-    `).run(url, title(post), post.authorHandle ?? post.authorName, post.text.slice(0, 2_000), post.language, now, now);
+    `).run(url, title(post), post.authorHandle ?? post.authorName, description(post), post.language, now, now);
   }
 
   const resource = resourceId ?? (db.prepare("SELECT id FROM resources WHERE canonical_url = ?").get(url) as { id: number }).id;
