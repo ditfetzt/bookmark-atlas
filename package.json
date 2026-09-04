@@ -1,0 +1,24 @@
+{
+  "name": "bookmark-atlas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "bookmark-atlas": "./src/cli.ts"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "sync:github": "node src/cli.ts sync github",
+    "enrich:github": "node src/cli.ts enrich github-readmes",
+    "search": "node src/cli.ts search",
+    "status": "node src/cli.ts status",
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  }
+}
