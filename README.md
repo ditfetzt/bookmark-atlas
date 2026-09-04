@@ -35,6 +35,9 @@ npm run sync:github
 npm run enrich:github -- --limit 25
 npm run import:x -- ./bookmarks.json
 npm run benchmark:retrieval
+npm run snapshot:build -- ./dist/bookmarks.db --version 1
+node src/cli.ts snapshot install ./dist/bookmarks.db ./dist/bookmarks.db.manifest.json ./data/replica.db
+npm run search -- "local-first agents" --snapshot ./data/replica.db
 npm run search -- "local-first agents"
 npm run status
 node src/cli.ts get 1
@@ -62,5 +65,7 @@ By default the database is created at `./data/bookmarks.db`. Override it with `B
 The X importer accepts Siftly native captures, Siftly normalized exports, and individual X API v2 response pages. See [the X spike notes](./docs/spikes/x-bookmarks.md). Bookmark Atlas deliberately does not store X browser cookies; live browser and OAuth adapters will feed the same normalization layer later.
 
 The versioned 20-query retrieval benchmark currently favors FTS5 over the tested local macOS embedding model. See [the retrieval benchmark](./docs/spikes/retrieval-benchmark.md) for metrics, methodology, and limitations.
+
+The snapshot protocol builds a consistent standalone SQLite artifact, verifies it with SHA-256 and `integrity_check`, and activates it atomically for read-only agent search. See [the snapshot spike](./docs/spikes/snapshot-protocol.md).
 
 See [PRD.md](./PRD.md) and [PRD-REVIEW.md](./PRD-REVIEW.md) for the reviewed product and architecture decisions.

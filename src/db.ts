@@ -18,6 +18,13 @@ export function openDatabase(path: string): AtlasDatabase {
   return db;
 }
 
+export function openReadOnlyDatabase(path: string): AtlasDatabase {
+  const db = new DatabaseSync(resolve(path), { readOnly: true });
+  db.exec("PRAGMA query_only = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
+  return db;
+}
+
 function migrate(db: AtlasDatabase): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_meta (

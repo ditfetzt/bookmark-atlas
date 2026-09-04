@@ -14,9 +14,10 @@
     "enrich:github": "node src/cli.ts enrich github-readmes",
     "import:x": "node src/cli.ts import x-json",
     "benchmark:retrieval": "node src/cli.ts benchmark retrieval",
+    "snapshot:build": "node src/cli.ts snapshot build",
     "search": "node src/cli.ts search",
     "status": "node src/cli.ts status",
-    "test": "node --test",
+    "test": "node --test --test-concurrency=1",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

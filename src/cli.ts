@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { databasePath, openDatabase } from "./db.ts";
+import { databasePath, openDatabase, openReadOnlyDatabase } from "./db.ts";
 import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile } from "./x.ts";
 import { runRetrievalBenchmark } from "./benchmark.ts";
+import { buildSnapshot, installSnapshot } from "./snapshot.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -29,8 +30,11 @@ Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
   bookmark-atlas import x-json <file> [--account NAME]
   bookmark-atlas benchmark retrieval [--cases FILE]
+  bookmark-atlas snapshot build <output> [--version N]
+  bookmark-atlas snapshot install <source> <manifest> <destination>
   bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
   bookmark-atlas search <query> [--limit N]
+  bookmark-atlas search <query> --snapshot FILE
   bookmark-atlas get <resource-id> [--content]
   bookmark-atlas status
 
@@ -48,7 +52,17 @@ async function main(): Promise<void> {
     return;
   }
 
-  const db = openDatabase(databasePath());
+  if (command === "snapshot" && args[1] === "install") {
+    const [source, manifest, destination] = args.slice(2, 5);
+    if (!source || !manifest || !destination) {
+      throw new Error("snapshot install requires source, manifest, and destination paths");
+    }
+    console.log(JSON.stringify(await installSnapshot(source, manifest, destination), null, 2));
+    return;
+  }
+
+  const snapshotPath = command === "search" ? optionValue(args, "--snapshot") : undefined;
+  const db = snapshotPath ? openReadOnlyDatabase(snapshotPath) : openDatabase(databasePath());
   try {
     if (command === "sync" && args[1] === "github") {
       const rawLimit = optionValue(args, "--limit");
@@ -84,6 +98,18 @@ async function main(): Promise<void> {
     if (command === "benchmark" && args[1] === "retrieval") {
       const cases = optionValue(args, "--cases") ?? "eval/retrieval-cases.json";
       console.log(JSON.stringify(runRetrievalBenchmark(db, cases), null, 2));
+      return;
+    }
+
+    if (command === "snapshot" && args[1] === "build") {
+      const output = args[2];
+      if (!output || output.startsWith("--")) throw new Error("snapshot build requires an output path");
+      const rawVersion = optionValue(args, "--version");
+      const version = rawVersion ? Number.parseInt(rawVersion, 10) : undefined;
+      if (rawVersion && (!Number.isSafeInteger(version) || (version ?? 0) < 1)) {
+        throw new Error("--version must be a positive safe integer");
+      }
+      console.log(JSON.stringify(await buildSnapshot(db, output, version), null, 2));
       return;
     }
 
