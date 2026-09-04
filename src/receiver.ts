@@ -7,7 +7,7 @@ const MAX_BODY_BYTES = 8 * 1024 * 1024;
 const TOKEN_HEADER = "x-bookmark-atlas-session-token";
 
 type Session = { account: string; source: string };
-type CaptureBody = { sessionId?: unknown; bookmarks?: unknown; source?: unknown };
+type CaptureBody = { sessionId?: unknown; bookmarks?: unknown; source?: unknown; account?: unknown };
 
 function json(response: ServerResponse, status: number, value: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -70,7 +70,7 @@ export async function startXCaptureServer(options: XCaptureServerOptions): Promi
       if (path === "/session/start") {
         const sessionId = randomUUID();
         sessions.set(sessionId, {
-          account: typeof payload.source === "string" ? payload.source : "browser-capture",
+          account: typeof payload.account === "string" ? payload.account : "ego-browser",
           source: typeof payload.source === "string" ? payload.source : "x-browser",
         });
         return json(response, 201, { sessionId });
