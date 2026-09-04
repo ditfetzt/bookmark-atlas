@@ -10,6 +10,7 @@ import { collectXBookmarks } from "./collector.ts";
 import { startXCaptureServer } from "./receiver.ts";
 import { startDashboardServer } from "./dashboard.ts";
 import { startAgentApiServer } from "./agent-api.ts";
+import { enqueueThumbnailJobs } from "./thumbnails.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -45,6 +46,7 @@ Usage:
   bookmark-atlas search <query> --snapshot FILE
   bookmark-atlas get <resource-id> [--content]
   bookmark-atlas status
+  bookmark-atlas thumbnails enqueue
 
 Environment:
   BOOKMARK_ATLAS_DB             SQLite path (default: ./data/bookmarks.db)
@@ -52,6 +54,8 @@ Environment:
   BOOKMARK_ATLAS_TWEETXVAULT_BIN TweetXVault executable (default: tweetxvault)
   BOOKMARK_ATLAS_X_CAPTURE_TOKEN Required token for local browser capture receiver
   BOOKMARK_ATLAS_AGENT_TOKEN    Optional Bearer token for the read-only agent API
+  BOOKMARK_ATLAS_THUMBNAIL_WORKER_URL  Cloudflare thumbnail Worker URL
+  BOOKMARK_ATLAS_THUMBNAIL_WORKER_TOKEN  Worker Bearer token
 `);
 }
 
@@ -75,6 +79,14 @@ async function main(): Promise<void> {
   const snapshotPath = command === "search" ? optionValue(args, "--snapshot") : undefined;
   const db = snapshotPath ? openReadOnlyDatabase(snapshotPath) : openDatabase(databasePath());
   try {
+    if (command === "thumbnails" && args[1] === "enqueue") {
+      const workerUrl = process.env.BOOKMARK_ATLAS_THUMBNAIL_WORKER_URL;
+      const token = process.env.BOOKMARK_ATLAS_THUMBNAIL_WORKER_TOKEN;
+      if (!workerUrl || !token) throw new Error("Set BOOKMARK_ATLAS_THUMBNAIL_WORKER_URL and BOOKMARK_ATLAS_THUMBNAIL_WORKER_TOKEN before enqueueing thumbnails");
+      console.log(JSON.stringify(await enqueueThumbnailJobs(db, workerUrl, token), null, 2));
+      return;
+    }
+
     if (command === "collect" && args[1] === "x") {
       const account = optionValue(args, "--account");
       const result = collectXBookmarks(db, {
