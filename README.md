@@ -13,6 +13,7 @@ This repository currently contains the Phase-0 GitHub spike and an offline X imp
 - preserve sync status and the GitHub collection ETag.
 - import Siftly capture/export JSON or X API v2 bookmark pages without storing X credentials,
 - normalize X posts into the same resource, capture, chunk, and FTS5 model.
+- collect X bookmarks locally through TweetXVault without storing X cookies in Bookmark Atlas.
 
 ## Requirements
 
@@ -34,6 +35,8 @@ Tokens are never written to the database or logs.
 npm run sync:github
 npm run enrich:github -- --limit 25
 npm run import:x -- ./bookmarks.json
+node src/cli.ts collect x
+node src/cli.ts collect x --full
 npm run benchmark:retrieval
 npm run snapshot:build -- ./dist/bookmarks.db --version 1
 node src/cli.ts snapshot install ./dist/bookmarks.db ./dist/bookmarks.db.manifest.json ./data/replica.db
@@ -67,5 +70,7 @@ The X importer accepts Siftly native captures, Siftly normalized exports, and in
 The versioned 20-query retrieval benchmark currently favors FTS5 over the tested local macOS embedding model. See [the retrieval benchmark](./docs/spikes/retrieval-benchmark.md) for metrics, methodology, and limitations.
 
 The snapshot protocol builds a consistent standalone SQLite artifact, verifies it with SHA-256 and `integrity_check`, and activates it atomically for read-only agent search. See [the snapshot spike](./docs/spikes/snapshot-protocol.md).
+
+For local X collection, install TweetXVault separately and authenticate it in the browser-backed local environment. `collect x` runs `tweetxvault sync bookmarks`, exports JSON into a temporary directory, imports it, and removes the temporary directory. Use `--keep-export` only for debugging. The collector should run on the logged-in Mac, not on the VPS; browser session cookies are never passed to Bookmark Atlas.
 
 See [PRD.md](./PRD.md) and [PRD-REVIEW.md](./PRD-REVIEW.md) for the reviewed product and architecture decisions.

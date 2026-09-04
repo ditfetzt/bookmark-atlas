@@ -6,6 +6,7 @@ import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile } from "./x.ts";
 import { runRetrievalBenchmark } from "./benchmark.ts";
 import { buildSnapshot, installSnapshot } from "./snapshot.ts";
+import { collectXBookmarks } from "./collector.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -29,6 +30,7 @@ function printHelp(): void {
 Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
   bookmark-atlas import x-json <file> [--account NAME]
+  bookmark-atlas collect x [--account NAME] [--full] [--keep-export]
   bookmark-atlas benchmark retrieval [--cases FILE]
   bookmark-atlas snapshot build <output> [--version N]
   bookmark-atlas snapshot install <source> <manifest> <destination>
@@ -41,6 +43,7 @@ Usage:
 Environment:
   BOOKMARK_ATLAS_DB             SQLite path (default: ./data/bookmarks.db)
   BOOKMARK_ATLAS_GITHUB_TOKEN   GitHub token (falls back to GH_TOKEN or gh auth token)
+  BOOKMARK_ATLAS_TWEETXVAULT_BIN TweetXVault executable (default: tweetxvault)
 `);
 }
 
@@ -64,6 +67,17 @@ async function main(): Promise<void> {
   const snapshotPath = command === "search" ? optionValue(args, "--snapshot") : undefined;
   const db = snapshotPath ? openReadOnlyDatabase(snapshotPath) : openDatabase(databasePath());
   try {
+    if (command === "collect" && args[1] === "x") {
+      const account = optionValue(args, "--account");
+      const result = collectXBookmarks(db, {
+        ...(account ? { account } : {}),
+        full: args.includes("--full"),
+        keepExport: args.includes("--keep-export"),
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
     if (command === "sync" && args[1] === "github") {
       const rawLimit = optionValue(args, "--limit");
       const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;

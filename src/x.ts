@@ -13,7 +13,7 @@ export type XImportOptions = {
 };
 
 export type XImportResult = {
-  format: "siftly-native" | "siftly-export" | "x-api-v2";
+  format: "siftly-native" | "siftly-export" | "tweetxvault" | "x-api-v2";
   total: number;
   imported: number;
   updated: number;
@@ -80,6 +80,15 @@ function decodeEntities(text: string): string {
 
 function uniqueStrings(values: unknown[]): string[] {
   return [...new Set(values.map(string).filter((value): value is string => value !== null))];
+}
+
+function jsonObject(value: unknown): JsonObject | null {
+  if (typeof value !== "string") return object(value);
+  try {
+    return object(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 function entityUrls(tweet: JsonObject): string[] {
@@ -193,6 +202,38 @@ function normalizeSiftlyExport(value: unknown): NormalizedPost | null {
   };
 }
 
+function normalizeTweetXVault(value: unknown): NormalizedPost | null {
+  const bookmark = object(value);
+  if (!bookmark) return null;
+  const id = string(bookmark.tweet_id) ?? string(bookmark.tweetId);
+  if (!id) return null;
+  const mediaValue = bookmark.media ?? bookmark.media_items ?? bookmark.mediaItems;
+  const media = Array.isArray(mediaValue)
+    ? mediaValue.map(object).filter((item): item is JsonObject => item !== null)
+    : [];
+  const raw = jsonObject(bookmark.raw_json) ?? bookmark;
+  const urlValues = [bookmark.urls, bookmark.outbound_urls, bookmark.outboundUrls]
+    .flatMap((value) => Array.isArray(value) ? value : [value]);
+  const outboundUrls = uniqueStrings(urlValues.flatMap((value) => {
+    const item = object(value);
+    return item ? [item.expanded_url, item.unwound_url, item.url] : [value];
+  }));
+  return {
+    id,
+    text: string(bookmark.text) ?? string(bookmark.full_text) ?? string(bookmark.content) ?? "",
+    authorId: string(bookmark.author_id) ?? string(bookmark.authorId),
+    authorHandle: string(bookmark.author_username) ?? string(bookmark.author_handle) ?? string(bookmark.authorHandle),
+    authorName: string(bookmark.author_display_name) ?? string(bookmark.author_name) ?? string(bookmark.authorName),
+    language: string(bookmark.lang) ?? string(bookmark.language),
+    postCreatedAt: validDate(bookmark.created_at) ?? validDate(bookmark.post_created_at) ?? validDate(bookmark.tweetCreatedAt),
+    savedAt: validDate(bookmark.added_at) ?? validDate(bookmark.captured_at) ?? validDate(bookmark.saved_at) ?? validDate(bookmark.importedAt),
+    conversationId: string(bookmark.conversation_id) ?? string(bookmark.conversationId),
+    media,
+    outboundUrls,
+    raw,
+  };
+}
+
 function normalizeApiV2(value: unknown, users: Map<string, JsonObject>, media: Map<string, JsonObject>): NormalizedPost | null {
   const tweet = object(value);
   if (!tweet) return null;
@@ -222,6 +263,27 @@ function normalizeApiV2(value: unknown, users: Map<string, JsonObject>, media: M
 
 function parseInput(input: unknown): ParsedImport {
   const root = object(input);
+  const tweetxvaultEntries = root && Array.isArray(root.bookmarks)
+    ? root.bookmarks
+    : Array.isArray(input) && input.some((value) => {
+        const item = object(value);
+        return item && ("tweet_id" in item || "author_username" in item || "raw_json" in item);
+      })
+      ? input
+      : null;
+  if (tweetxvaultEntries) {
+    const isTweetXVault = tweetxvaultEntries.some((value) => {
+      const item = object(value);
+      return item && ("tweet_id" in item || "author_username" in item || "raw_json" in item);
+    });
+    if (isTweetXVault) {
+      return {
+        format: "tweetxvault",
+        source: string(root?.source) ?? "tweetxvault",
+        posts: tweetxvaultEntries.map(normalizeTweetXVault),
+      };
+    }
+  }
   if (root && Array.isArray(root.bookmarks)) {
     return {
       format: "siftly-native",

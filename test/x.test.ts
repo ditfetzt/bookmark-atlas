@@ -76,6 +76,29 @@ test("imports an X API v2 page and resolves included author data", () => {
   db.close();
 });
 
+test("imports a TweetXVault JSON export", () => {
+  const db = openDatabase(":memory:");
+  const result = importXJson(db, [{
+    tweet_id: "88",
+    text: "Local bookmark archive",
+    author_id: "8",
+    author_username: "archiver",
+    author_display_name: "Archive Builder",
+    created_at: "2026-08-01T00:00:00Z",
+    added_at: "2026-09-01T00:00:00Z",
+    conversation_id: "88",
+    urls: [{ expanded_url: "https://example.com/archive" }],
+    raw_json: JSON.stringify({ rest_id: "88", legacy: { full_text: "Local bookmark archive" } }),
+  }]);
+
+  assert.equal(result.format, "tweetxvault");
+  assert.equal(result.imported, 1);
+  assert.equal((db.prepare("SELECT author_handle AS handle FROM x_posts").get() as { handle: string }).handle, "archiver");
+  assert.equal((db.prepare("SELECT saved_at AS savedAt FROM saves").get() as { savedAt: string }).savedAt, "2026-09-01T00:00:00.000Z");
+  assert.match((db.prepare("SELECT outbound_urls AS urls FROM x_posts").get() as { urls: string }).urls, /example.com\/archive/);
+  db.close();
+});
+
 test("skips malformed entries without discarding valid bookmarks", () => {
   const db = openDatabase(":memory:");
   const result = importXJson(db, { bookmarks: [{ nope: true }, nativeTweet] });
