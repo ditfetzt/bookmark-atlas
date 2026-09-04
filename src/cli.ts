@@ -46,7 +46,7 @@ Usage:
   bookmark-atlas search <query> --snapshot FILE
   bookmark-atlas get <resource-id> [--content]
   bookmark-atlas status
-  bookmark-atlas thumbnails enqueue
+  bookmark-atlas thumbnails enqueue [--limit N]
 
 Environment:
   BOOKMARK_ATLAS_DB             SQLite path (default: ./data/bookmarks.db)
@@ -83,7 +83,12 @@ async function main(): Promise<void> {
       const workerUrl = process.env.BOOKMARK_ATLAS_THUMBNAIL_WORKER_URL;
       const token = process.env.BOOKMARK_ATLAS_THUMBNAIL_WORKER_TOKEN;
       if (!workerUrl || !token) throw new Error("Set BOOKMARK_ATLAS_THUMBNAIL_WORKER_URL and BOOKMARK_ATLAS_THUMBNAIL_WORKER_TOKEN before enqueueing thumbnails");
-      console.log(JSON.stringify(await enqueueThumbnailJobs(db, workerUrl, token), null, 2));
+      const rawLimit = optionValue(args, "--limit");
+      const limit = rawLimit === undefined ? undefined : Number.parseInt(rawLimit, 10);
+      if (rawLimit !== undefined && (!Number.isSafeInteger(limit) || (limit ?? 0) < 1)) {
+        throw new Error("--limit must be a positive integer");
+      }
+      console.log(JSON.stringify(await enqueueThumbnailJobs(db, workerUrl, token, 25, limit), null, 2));
       return;
     }
 
