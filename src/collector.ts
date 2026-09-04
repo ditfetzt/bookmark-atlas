@@ -33,7 +33,7 @@ export function collectXBookmarks(db: AtlasDatabase, options: CollectXOptions = 
     const syncArgs = ["sync", "bookmarks"];
     if (options.full) syncArgs.push("--full");
     run(executable, syncArgs);
-    run(executable, ["export", "json", "--output", exportPath]);
+    run(executable, ["export", "json", "--collection", "bookmarks", "--out", exportPath]);
     const result = importXJsonFile(db, exportPath, options.account ? { account: options.account } : {});
     return options.keepExport ? { ...result, exportPath } : result;
   } finally {

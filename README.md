@@ -71,6 +71,6 @@ The versioned 20-query retrieval benchmark currently favors FTS5 over the tested
 
 The snapshot protocol builds a consistent standalone SQLite artifact, verifies it with SHA-256 and `integrity_check`, and activates it atomically for read-only agent search. See [the snapshot spike](./docs/spikes/snapshot-protocol.md).
 
-For local X collection, install TweetXVault separately and authenticate it in the browser-backed local environment. `collect x` runs `tweetxvault sync bookmarks`, exports JSON into a temporary directory, imports it, and removes the temporary directory. Use `--keep-export` only for debugging. The collector should run on the logged-in Mac, not on the VPS; browser session cookies are never passed to Bookmark Atlas.
+For local X collection, install TweetXVault separately and authenticate it in the browser-backed local environment. `collect x` runs `tweetxvault sync bookmarks`, exports the bookmarks JSON into a temporary directory, imports it, and removes the temporary directory. Use `--keep-export` only for debugging. The collector should run on the logged-in Mac, not on the VPS; browser session cookies are never passed to Bookmark Atlas.
 
 See [PRD.md](./PRD.md) and [PRD-REVIEW.md](./PRD-REVIEW.md) for the reviewed product and architecture decisions.
