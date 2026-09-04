@@ -4,6 +4,7 @@ import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile } from "./x.ts";
+import { runRetrievalBenchmark } from "./benchmark.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -27,6 +28,7 @@ function printHelp(): void {
 Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
   bookmark-atlas import x-json <file> [--account NAME]
+  bookmark-atlas benchmark retrieval [--cases FILE]
   bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
   bookmark-atlas search <query> [--limit N]
   bookmark-atlas get <resource-id> [--content]
@@ -76,6 +78,12 @@ async function main(): Promise<void> {
       if (!file || file.startsWith("--")) throw new Error("import x-json requires a file path");
       const account = optionValue(args, "--account");
       console.log(JSON.stringify(importXJsonFile(db, file, account ? { account } : {}), null, 2));
+      return;
+    }
+
+    if (command === "benchmark" && args[1] === "retrieval") {
+      const cases = optionValue(args, "--cases") ?? "eval/retrieval-cases.json";
+      console.log(JSON.stringify(runRetrievalBenchmark(db, cases), null, 2));
       return;
     }
 

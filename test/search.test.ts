@@ -5,7 +5,8 @@ import { openDatabase } from "../src/db.ts";
 import { getResource, searchResources, toFtsQuery } from "../src/search.ts";
 
 test("normalizes user input into a safe FTS query", () => {
-  assert.equal(toFtsQuery("Next.js OAuth"), '"Next" AND "js" AND "OAuth"');
+  assert.equal(toFtsQuery("Next.js OAuth"), '"Next" OR "js" OR "OAuth"');
+  assert.equal(toFtsQuery("search for the local knowledge base"), '"search" OR "local" OR "knowledge" OR "base"');
   assert.equal(toFtsQuery("   "), "");
 });
 

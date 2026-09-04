@@ -34,6 +34,7 @@ Tokens are never written to the database or logs.
 npm run sync:github
 npm run enrich:github -- --limit 25
 npm run import:x -- ./bookmarks.json
+npm run benchmark:retrieval
 npm run search -- "local-first agents"
 npm run status
 node src/cli.ts get 1
@@ -59,5 +60,7 @@ By default the database is created at `./data/bookmarks.db`. Override it with `B
 - Background refresh, live X fetching, remote API, MCP, and dashboard are not implemented yet.
 
 The X importer accepts Siftly native captures, Siftly normalized exports, and individual X API v2 response pages. See [the X spike notes](./docs/spikes/x-bookmarks.md). Bookmark Atlas deliberately does not store X browser cookies; live browser and OAuth adapters will feed the same normalization layer later.
+
+The versioned 20-query retrieval benchmark currently favors FTS5 over the tested local macOS embedding model. See [the retrieval benchmark](./docs/spikes/retrieval-benchmark.md) for metrics, methodology, and limitations.
 
 See [PRD.md](./PRD.md) and [PRD-REVIEW.md](./PRD-REVIEW.md) for the reviewed product and architecture decisions.

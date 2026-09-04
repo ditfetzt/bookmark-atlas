@@ -32,8 +32,13 @@ export type ResourceResult = {
 };
 
 export function toFtsQuery(input: string): string {
+  const stopWords = new Set([
+    "a", "an", "and", "for", "from", "in", "into", "of", "on", "or", "over", "the", "to", "with",
+    "das", "der", "die", "ein", "eine", "für", "im", "in", "mit", "oder", "und", "von", "zu",
+  ]);
   const tokens = input.normalize("NFKC").match(/[\p{L}\p{N}_-]+/gu) ?? [];
-  return tokens.map((token) => `"${token.replaceAll('"', '""')}"`).join(" AND ");
+  const meaningful = tokens.filter((token) => !stopWords.has(token.toLocaleLowerCase()));
+  return meaningful.map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
 }
 
 export function searchResources(

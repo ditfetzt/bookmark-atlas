@@ -13,6 +13,7 @@
     "sync:github": "node src/cli.ts sync github",
     "enrich:github": "node src/cli.ts enrich github-readmes",
     "import:x": "node src/cli.ts import x-json",
+    "benchmark:retrieval": "node src/cli.ts benchmark retrieval",
     "search": "node src/cli.ts search",
     "status": "node src/cli.ts status",
     "test": "node --test",
