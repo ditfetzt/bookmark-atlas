@@ -79,6 +79,19 @@ function migrate(db: AtlasDatabase): void {
       github_updated_at TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS x_posts (
+      resource_id INTEGER PRIMARY KEY REFERENCES resources(id) ON DELETE CASCADE,
+      x_post_id TEXT NOT NULL UNIQUE,
+      author_id TEXT,
+      author_handle TEXT,
+      author_name TEXT,
+      post_created_at TEXT,
+      conversation_id TEXT,
+      media TEXT NOT NULL DEFAULT '[]',
+      outbound_urls TEXT NOT NULL DEFAULT '[]',
+      raw_json TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS sync_checkpoints (
       integration_id INTEGER PRIMARY KEY REFERENCES integrations(id),
       etag TEXT,

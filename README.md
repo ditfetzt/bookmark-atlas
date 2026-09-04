@@ -2,7 +2,7 @@
 
 Bookmark Atlas turns personal bookmarks into a local, searchable knowledge base for humans and coding agents.
 
-This repository currently contains the Phase-0 GitHub spike:
+This repository currently contains the Phase-0 GitHub spike and an offline X import boundary:
 
 - import starred repositories from the authenticated GitHub account,
 - persist normalized repository metadata in SQLite,
@@ -11,6 +11,8 @@ This repository currently contains the Phase-0 GitHub spike:
 - chunk README content for later semantic retrieval,
 - search locally without an LLM or network request,
 - preserve sync status and the GitHub collection ETag.
+- import Siftly capture/export JSON or X API v2 bookmark pages without storing X credentials,
+- normalize X posts into the same resource, capture, chunk, and FTS5 model.
 
 ## Requirements
 
@@ -31,6 +33,7 @@ Tokens are never written to the database or logs.
 ```bash
 npm run sync:github
 npm run enrich:github -- --limit 25
+npm run import:x -- ./bookmarks.json
 npm run search -- "local-first agents"
 npm run status
 node src/cli.ts get 1
@@ -53,6 +56,8 @@ By default the database is created at `./data/bookmarks.db`. Override it with `B
 - Individual README responses are capped at 2 MiB.
 - A bounded import does not reconcile removed stars.
 - The SQLite database is currently the spike's local store. The reviewed architecture later generates it as a read-only snapshot from canonical PostgreSQL data.
-- Background refresh, remote API, MCP, X import, and dashboard are not implemented yet.
+- Background refresh, live X fetching, remote API, MCP, and dashboard are not implemented yet.
+
+The X importer accepts Siftly native captures, Siftly normalized exports, and individual X API v2 response pages. See [the X spike notes](./docs/spikes/x-bookmarks.md). Bookmark Atlas deliberately does not store X browser cookies; live browser and OAuth adapters will feed the same normalization layer later.
 
 See [PRD.md](./PRD.md) and [PRD-REVIEW.md](./PRD-REVIEW.md) for the reviewed product and architecture decisions.

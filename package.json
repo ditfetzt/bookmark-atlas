@@ -12,6 +12,7 @@
   "scripts": {
     "sync:github": "node src/cli.ts sync github",
     "enrich:github": "node src/cli.ts enrich github-readmes",
+    "import:x": "node src/cli.ts import x-json",
     "search": "node src/cli.ts search",
     "status": "node src/cli.ts status",
     "test": "node --test",

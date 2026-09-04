@@ -3,6 +3,7 @@ import { databasePath, openDatabase } from "./db.ts";
 import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
+import { importXJsonFile } from "./x.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -25,6 +26,7 @@ function printHelp(): void {
 
 Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
+  bookmark-atlas import x-json <file> [--account NAME]
   bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
   bookmark-atlas search <query> [--limit N]
   bookmark-atlas get <resource-id> [--content]
@@ -69,6 +71,14 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (command === "import" && args[1] === "x-json") {
+      const file = args[2];
+      if (!file || file.startsWith("--")) throw new Error("import x-json requires a file path");
+      const account = optionValue(args, "--account");
+      console.log(JSON.stringify(importXJsonFile(db, file, account ? { account } : {}), null, 2));
+      return;
+    }
+
     if (command === "enrich" && args[1] === "github-readmes") {
       const limit = Number.parseInt(optionValue(args, "--limit") ?? "25", 10);
       const concurrency = Number.parseInt(optionValue(args, "--concurrency") ?? "4", 10);
@@ -98,6 +108,7 @@ async function main(): Promise<void> {
           (SELECT COUNT(*) FROM saves WHERE unsaved_at IS NULL) AS activeSaves,
           (SELECT COUNT(*) FROM resources_fts) AS indexedResources,
           (SELECT COUNT(*) FROM captures WHERE kind = 'github_readme') AS readmeCaptures,
+          (SELECT COUNT(*) FROM x_posts) AS xPosts,
           (SELECT COUNT(*) FROM chunks) AS chunks
       `).get();
       const sync = db.prepare(`
