@@ -8,6 +8,7 @@ import { runRetrievalBenchmark } from "./benchmark.ts";
 import { buildSnapshot, installSnapshot } from "./snapshot.ts";
 import { collectXBookmarks } from "./collector.ts";
 import { startXCaptureServer } from "./receiver.ts";
+import { startDashboardServer } from "./dashboard.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -33,6 +34,7 @@ Usage:
   bookmark-atlas import x-json <file> [--account NAME]
   bookmark-atlas collect x [--account NAME] [--full] [--keep-export]
   bookmark-atlas capture x [--port N]
+  bookmark-atlas dashboard [--port N]
   bookmark-atlas benchmark retrieval [--cases FILE]
   bookmark-atlas snapshot build <output> [--version N]
   bookmark-atlas snapshot install <source> <manifest> <destination>
@@ -91,6 +93,20 @@ async function main(): Promise<void> {
       console.log(JSON.stringify({ listening: capture.address, endpoints: ["/session/start", "/session/batch", "/session/complete"] }, null, 2));
       await new Promise<void>((resolve, reject) => {
         const stop = () => capture.close().then(resolve, reject);
+        process.once("SIGINT", stop);
+        process.once("SIGTERM", stop);
+      });
+      return;
+    }
+
+    if (command === "dashboard") {
+      const rawPort = optionValue(args, "--port");
+      const port = rawPort ? Number.parseInt(rawPort, 10) : 4173;
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("--port must be between 1 and 65535");
+      const dashboard = await startDashboardServer(db, { port });
+      console.log(JSON.stringify({ listening: dashboard.address }, null, 2));
+      await new Promise<void>((resolve, reject) => {
+        const stop = () => dashboard.close().then(resolve, reject);
         process.once("SIGINT", stop);
         process.once("SIGTERM", stop);
       });

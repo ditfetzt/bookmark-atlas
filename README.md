@@ -38,6 +38,7 @@ npm run import:x -- ./bookmarks.json
 node src/cli.ts collect x
 node src/cli.ts collect x --full
 BOOKMARK_ATLAS_X_CAPTURE_TOKEN="change-me" node src/cli.ts capture x
+node src/cli.ts dashboard
 npm run benchmark:retrieval
 npm run snapshot:build -- ./dist/bookmarks.db --version 1
 node src/cli.ts snapshot install ./dist/bookmarks.db ./dist/bookmarks.db.manifest.json ./data/replica.db
