@@ -14,6 +14,7 @@ This repository currently contains the Phase-0 GitHub spike and an offline X imp
 - import Siftly capture/export JSON or X API v2 bookmark pages without storing X credentials,
 - normalize X posts into the same resource, capture, chunk, and FTS5 model.
 - collect X bookmarks locally through TweetXVault without storing X cookies in Bookmark Atlas.
+- serve a private dashboard with source mix, bookmark timeline, topic and language breakdowns, and a searchable library.
 
 ## Requirements
 
@@ -66,7 +67,7 @@ By default the database is created at `./data/bookmarks.db`. Override it with `B
 - Individual README responses are capped at 2 MiB.
 - A bounded import does not reconcile removed stars.
 - The SQLite database is currently the spike's local store. The reviewed architecture later generates it as a read-only snapshot from canonical PostgreSQL data.
-- Background refresh, live X fetching, remote API, MCP, and dashboard are not implemented yet.
+- Background refresh, live X fetching, remote API, and MCP are not implemented yet. The dashboard and read-only agent API are available.
 
 The X importer accepts Siftly native captures, Siftly normalized exports, and individual X API v2 response pages. See [the X spike notes](./docs/spikes/x-bookmarks.md). Bookmark Atlas deliberately does not store X browser cookies; live browser and OAuth adapters will feed the same normalization layer later.
 
