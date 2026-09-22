@@ -190,3 +190,42 @@ test("marks missing stars as unsaved during a full reconciliation", async () => 
   );
   db.close();
 });
+
+test("updates a renamed repository in place instead of colliding on node_id", async () => {
+  const db = openDatabase(":memory:");
+  const renamed: GitHubStar = {
+    ...star,
+    repo: {
+      ...star.repo,
+      name: "llm-gateway",
+      full_name: "example/llm-gateway",
+      html_url: "https://github.com/example/llm-gateway",
+    },
+  };
+  let calls = 0;
+  const mockFetch: typeof fetch = async () =>
+    new Response(JSON.stringify(calls++ === 0 ? [star] : [renamed]), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+
+  await syncGitHubStars(db, { account: "test", token: "test-token", fetchImpl: mockFetch });
+  const result = await syncGitHubStars(db, {
+    account: "test",
+    token: "test-token",
+    fetchImpl: mockFetch,
+  });
+
+  assert.equal(result.imported, 0);
+  assert.equal(result.updated, 1);
+  assert.equal(
+    (db.prepare("SELECT COUNT(*) AS count FROM resources").get() as { count: number }).count,
+    1,
+  );
+  const row = db
+    .prepare("SELECT canonical_url AS url, title FROM resources")
+    .get() as { url: string; title: string };
+  assert.equal(row.url, "https://github.com/example/llm-gateway");
+  assert.equal(row.title, "example/llm-gateway");
+  db.close();
+});

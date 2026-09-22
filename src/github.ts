@@ -96,35 +96,65 @@ function upsertStar(
 ): "imported" | "updated" {
   const now = new Date().toISOString();
   const repo = star.repo;
-  const existing = db
-    .prepare("SELECT id FROM resources WHERE canonical_url = ?")
-    .get(repo.html_url) as { id: number } | undefined;
 
-  db.prepare(`
-    INSERT INTO resources (
-      canonical_url, resource_type, title, author, description, language,
-      availability_status, created_at, updated_at
-    ) VALUES (?, 'github_repository', ?, ?, ?, ?, 'available', ?, ?)
-    ON CONFLICT(canonical_url) DO UPDATE SET
-      title = excluded.title,
-      author = excluded.author,
-      description = excluded.description,
-      language = excluded.language,
-      availability_status = 'available',
-      updated_at = excluded.updated_at
-  `).run(
-    repo.html_url,
-    repo.full_name,
-    repo.owner.login,
-    repo.description,
-    repo.language,
-    now,
-    now,
-  );
+  // GitHub keeps node_id/github_id stable across renames, but html_url changes.
+  // Resolve the existing repository by identity first, so a renamed repo updates
+  // its resource instead of inserting a row that collides on node_id/github_id.
+  const knownRepo = db
+    .prepare("SELECT resource_id FROM github_repositories WHERE node_id = ? OR github_id = ?")
+    .get(repo.node_id, repo.id) as { resource_id: number } | undefined;
+  const knownResource = knownRepo
+    ? undefined
+    : (db.prepare("SELECT id FROM resources WHERE canonical_url = ?").get(repo.html_url) as
+        | { id: number }
+        | undefined);
+  const isNew = !knownRepo && !knownResource;
 
-  const resource = db
-    .prepare("SELECT id FROM resources WHERE canonical_url = ?")
-    .get(repo.html_url) as { id: number };
+  let resourceId: number;
+  if (knownRepo) {
+    resourceId = knownRepo.resource_id;
+    db.prepare(`
+      UPDATE resources
+      SET canonical_url = ?, title = ?, author = ?, description = ?, language = ?,
+          availability_status = 'available', updated_at = ?
+      WHERE id = ?
+    `).run(
+      repo.html_url,
+      repo.full_name,
+      repo.owner.login,
+      repo.description,
+      repo.language,
+      now,
+      resourceId,
+    );
+  } else {
+    db.prepare(`
+      INSERT INTO resources (
+        canonical_url, resource_type, title, author, description, language,
+        availability_status, created_at, updated_at
+      ) VALUES (?, 'github_repository', ?, ?, ?, ?, 'available', ?, ?)
+      ON CONFLICT(canonical_url) DO UPDATE SET
+        title = excluded.title,
+        author = excluded.author,
+        description = excluded.description,
+        language = excluded.language,
+        availability_status = 'available',
+        updated_at = excluded.updated_at
+    `).run(
+      repo.html_url,
+      repo.full_name,
+      repo.owner.login,
+      repo.description,
+      repo.language,
+      now,
+      now,
+    );
+    resourceId =
+      knownResource?.id ??
+      (db.prepare("SELECT id FROM resources WHERE canonical_url = ?").get(repo.html_url) as {
+        id: number;
+      }).id;
+  }
 
   db.prepare(`
     INSERT INTO saves (
@@ -136,7 +166,7 @@ function upsertStar(
       saved_at = excluded.saved_at,
       unsaved_at = NULL,
       updated_at = excluded.updated_at
-  `).run(integrationId, repo.node_id, resource.id, star.starred_at, now, now);
+  `).run(integrationId, repo.node_id, resourceId, star.starred_at, now, now);
 
   db.prepare(`
     INSERT INTO github_repositories (
@@ -160,7 +190,7 @@ function upsertStar(
       pushed_at = excluded.pushed_at,
       github_updated_at = excluded.github_updated_at
   `).run(
-    resource.id,
+    resourceId,
     repo.id,
     repo.node_id,
     repo.owner.login,
@@ -177,9 +207,9 @@ function upsertStar(
     repo.updated_at,
   );
 
-  refreshResourceFts(db, resource.id);
+  refreshResourceFts(db, resourceId);
 
-  return existing ? "updated" : "imported";
+  return isNew ? "imported" : "updated";
 }
 
 export async function syncGitHubStars(
