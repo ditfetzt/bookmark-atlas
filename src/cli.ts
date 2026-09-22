@@ -1,16 +1,14 @@
 #!/usr/bin/env node
-import { databasePath, openDatabase, openReadOnlyDatabase } from "./db.ts";
+import { databasePath, openDatabase, refreshResourceFts } from "./db.ts";
 import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
+import { recall } from "./recall.ts";
+import { buildEmbeddings, embedQuery, embeddingsAvailable } from "./embeddings.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile } from "./x.ts";
-import { runRetrievalBenchmark } from "./benchmark.ts";
-import { buildSnapshot, installSnapshot } from "./snapshot.ts";
 import { collectXBookmarks } from "./collector.ts";
 import { startXCaptureServer } from "./receiver.ts";
-import { startDashboardServer } from "./dashboard.ts";
-import { startAgentApiServer } from "./agent-api.ts";
-import { enqueueThumbnailJobs } from "./thumbnails.ts";
+import { startMcpServer } from "./mcp.ts";
 
 function optionValue(args: string[], name: string): string | undefined {
   const index = args.indexOf(name);
@@ -29,33 +27,27 @@ function positional(args: string[]): string[] {
 }
 
 function printHelp(): void {
-  console.log(`Bookmark Atlas
+  console.log(`Bookmark Atlas — read your starred bookmarks and their content
 
 Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
-  bookmark-atlas import x-json <file> [--account NAME]
-  bookmark-atlas collect x [--account NAME] [--full] [--keep-export]
-  bookmark-atlas capture x [--port N]
-  bookmark-atlas dashboard [--port N]
-  bookmark-atlas agent-api [--port N]
-  bookmark-atlas benchmark retrieval [--cases FILE]
-  bookmark-atlas snapshot build <output> [--version N]
-  bookmark-atlas snapshot install <source> <manifest> <destination>
   bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
+  bookmark-atlas import x-json <file> [--account NAME] [--reconcile]
+  bookmark-atlas collect x [--account NAME] [--full] [--fast] [--keep-export]
+  bookmark-atlas capture x [--port N]
   bookmark-atlas search <query> [--limit N]
-  bookmark-atlas search <query> --snapshot FILE
+  bookmark-atlas recall <task> [--repo PATH] [--limit N] [--semantic]
+  bookmark-atlas embed [--limit N]
   bookmark-atlas get <resource-id> [--content]
+  bookmark-atlas note <resource-id> <text...> [--clear]
   bookmark-atlas status
-  bookmark-atlas thumbnails enqueue [--limit N]
+  bookmark-atlas mcp
 
 Environment:
-  BOOKMARK_ATLAS_DB             SQLite path (default: ./data/bookmarks.db)
-  BOOKMARK_ATLAS_GITHUB_TOKEN   GitHub token (falls back to GH_TOKEN or gh auth token)
+  BOOKMARK_ATLAS_DB              SQLite path (default: ./data/bookmarks.db)
+  BOOKMARK_ATLAS_GITHUB_TOKEN    GitHub token (falls back to GH_TOKEN or gh auth token)
   BOOKMARK_ATLAS_TWEETXVAULT_BIN TweetXVault executable (default: tweetxvault)
-  BOOKMARK_ATLAS_X_CAPTURE_TOKEN Required token for local browser capture receiver
-  BOOKMARK_ATLAS_AGENT_TOKEN    Optional Bearer token for the read-only agent API
-  BOOKMARK_ATLAS_THUMBNAIL_WORKER_URL  Cloudflare thumbnail Worker URL
-  BOOKMARK_ATLAS_THUMBNAIL_WORKER_TOKEN  Worker Bearer token
+  BOOKMARK_ATLAS_X_CAPTURE_TOKEN Required token for the local browser capture receiver
 `);
 }
 
@@ -67,36 +59,14 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (command === "snapshot" && args[1] === "install") {
-    const [source, manifest, destination] = args.slice(2, 5);
-    if (!source || !manifest || !destination) {
-      throw new Error("snapshot install requires source, manifest, and destination paths");
-    }
-    console.log(JSON.stringify(await installSnapshot(source, manifest, destination), null, 2));
-    return;
-  }
-
-  const snapshotPath = command === "search" ? optionValue(args, "--snapshot") : undefined;
-  const db = snapshotPath ? openReadOnlyDatabase(snapshotPath) : openDatabase(databasePath());
+  const db = openDatabase(databasePath());
   try {
-    if (command === "thumbnails" && args[1] === "enqueue") {
-      const workerUrl = process.env.BOOKMARK_ATLAS_THUMBNAIL_WORKER_URL;
-      const token = process.env.BOOKMARK_ATLAS_THUMBNAIL_WORKER_TOKEN;
-      if (!workerUrl || !token) throw new Error("Set BOOKMARK_ATLAS_THUMBNAIL_WORKER_URL and BOOKMARK_ATLAS_THUMBNAIL_WORKER_TOKEN before enqueueing thumbnails");
-      const rawLimit = optionValue(args, "--limit");
-      const limit = rawLimit === undefined ? undefined : Number.parseInt(rawLimit, 10);
-      if (rawLimit !== undefined && (!Number.isSafeInteger(limit) || (limit ?? 0) < 1)) {
-        throw new Error("--limit must be a positive integer");
-      }
-      console.log(JSON.stringify(await enqueueThumbnailJobs(db, workerUrl, token, 25, limit), null, 2));
-      return;
-    }
-
     if (command === "collect" && args[1] === "x") {
       const account = optionValue(args, "--account");
       const result = collectXBookmarks(db, {
         ...(account ? { account } : {}),
         full: args.includes("--full"),
+        fast: args.includes("--fast"),
         keepExport: args.includes("--keep-export"),
       });
       console.log(JSON.stringify(result, null, 2));
@@ -119,32 +89,8 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (command === "dashboard") {
-      const rawPort = optionValue(args, "--port");
-      const port = rawPort ? Number.parseInt(rawPort, 10) : 4173;
-      if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("--port must be between 1 and 65535");
-      const dashboard = await startDashboardServer(db, { port, host: process.env.BOOKMARK_ATLAS_HOST ?? "127.0.0.1" });
-      console.log(JSON.stringify({ listening: dashboard.address }, null, 2));
-      await new Promise<void>((resolve, reject) => {
-        const stop = () => dashboard.close().then(resolve, reject);
-        process.once("SIGINT", stop);
-        process.once("SIGTERM", stop);
-      });
-      return;
-    }
-
-    if (command === "agent-api") {
-      const rawPort = optionValue(args, "--port");
-      const port = rawPort ? Number.parseInt(rawPort, 10) : 4180;
-      if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error("--port must be between 1 and 65535");
-      const token = process.env.BOOKMARK_ATLAS_AGENT_TOKEN;
-      const api = await startAgentApiServer(db, { port, host: process.env.BOOKMARK_ATLAS_HOST ?? "127.0.0.1", ...(token ? { token } : {}) });
-      console.log(JSON.stringify({ listening: api.address, endpoints: ["/v1/health", "/v1/search?q=...", "/v1/recent", "/v1/resources/:id", "/v1/resources/:id/related"] }, null, 2));
-      await new Promise<void>((resolve, reject) => {
-        const stop = () => api.close().then(resolve, reject);
-        process.once("SIGINT", stop);
-        process.once("SIGTERM", stop);
-      });
+    if (command === "mcp") {
+      await startMcpServer(db);
       return;
     }
 
@@ -171,29 +117,49 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (command === "recall") {
+      const task = positional(args.slice(1)).join(" ").trim();
+      if (!task) throw new Error("recall requires a task description");
+      const repoPath = optionValue(args, "--repo");
+      const limit = Number.parseInt(optionValue(args, "--limit") ?? "5", 10);
+      // Semantic ranking is opt-in: measured against this corpus it did not beat
+      // keyword ranking. See the README.
+      const semantic = args.includes("--semantic") || process.env.BOOKMARK_ATLAS_SEMANTIC === "1";
+      const queryVector = semantic ? embedQuery(db, task) : null;
+      console.log(
+        JSON.stringify(
+          recall(db, { task, ...(repoPath ? { repoPath } : {}), limit, queryVector }),
+          null,
+          2,
+        ),
+      );
+      return;
+    }
+
+    if (command === "embed") {
+      const rawLimit = optionValue(args, "--limit");
+      const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+      if (rawLimit && (!Number.isSafeInteger(limit) || (limit ?? 0) < 1)) {
+        throw new Error("--limit must be a positive integer");
+      }
+      console.log(JSON.stringify(buildEmbeddings(db, limit ? { limit } : {}), null, 2));
+      return;
+    }
+
     if (command === "import" && args[1] === "x-json") {
       const file = args[2];
       if (!file || file.startsWith("--")) throw new Error("import x-json requires a file path");
       const account = optionValue(args, "--account");
-      console.log(JSON.stringify(importXJsonFile(db, file, account ? { account } : {}), null, 2));
-      return;
-    }
-
-    if (command === "benchmark" && args[1] === "retrieval") {
-      const cases = optionValue(args, "--cases") ?? "eval/retrieval-cases.json";
-      console.log(JSON.stringify(runRetrievalBenchmark(db, cases), null, 2));
-      return;
-    }
-
-    if (command === "snapshot" && args[1] === "build") {
-      const output = args[2];
-      if (!output || output.startsWith("--")) throw new Error("snapshot build requires an output path");
-      const rawVersion = optionValue(args, "--version");
-      const version = rawVersion ? Number.parseInt(rawVersion, 10) : undefined;
-      if (rawVersion && (!Number.isSafeInteger(version) || (version ?? 0) < 1)) {
-        throw new Error("--version must be a positive safe integer");
-      }
-      console.log(JSON.stringify(await buildSnapshot(db, output, version), null, 2));
+      console.log(
+        JSON.stringify(
+          importXJsonFile(db, file, {
+            ...(account ? { account } : {}),
+            reconcile: args.includes("--reconcile"),
+          }),
+          null,
+          2,
+        ),
+      );
       return;
     }
 
@@ -219,6 +185,28 @@ async function main(): Promise<void> {
       return;
     }
 
+    if (command === "note") {
+      const id = Number.parseInt(args[1] ?? "", 10);
+      if (!Number.isFinite(id) || id < 1) throw new Error("note requires a numeric resource id");
+      const text = positional(args.slice(2)).join(" ").trim();
+      if (!text || args.includes("--clear")) {
+        db.prepare("DELETE FROM resource_notes WHERE resource_id = ?").run(id);
+      } else {
+        db.prepare(`
+          INSERT INTO resource_notes (resource_id, context, updated_at)
+          VALUES (?, ?, ?)
+          ON CONFLICT(resource_id) DO UPDATE SET
+            context = excluded.context, updated_at = excluded.updated_at
+        `).run(id, text, new Date().toISOString());
+      }
+      refreshResourceFts(db, id);
+      const row = db.prepare("SELECT context FROM resource_notes WHERE resource_id = ?").get(id) as
+        | { context: string }
+        | undefined;
+      console.log(JSON.stringify({ id, context: row?.context ?? null }, null, 2));
+      return;
+    }
+
     if (command === "status") {
       const counts = db.prepare(`
         SELECT
@@ -227,7 +215,8 @@ async function main(): Promise<void> {
           (SELECT COUNT(*) FROM resources_fts) AS indexedResources,
           (SELECT COUNT(*) FROM captures WHERE kind = 'github_readme') AS readmeCaptures,
           (SELECT COUNT(*) FROM x_posts) AS xPosts,
-          (SELECT COUNT(*) FROM chunks) AS chunks
+          (SELECT COUNT(*) FROM chunks) AS chunks,
+          (SELECT COUNT(*) FROM chunk_embeddings) AS embeddedChunks
       `).get();
       const sync = db.prepare(`
         SELECT i.provider, i.account, c.high_watermark AS highWatermark,
@@ -237,7 +226,9 @@ async function main(): Promise<void> {
         LEFT JOIN sync_checkpoints c ON c.integration_id = i.id
         ORDER BY i.provider, i.account
       `).all();
-      console.log(JSON.stringify({ database: databasePath(), counts, sync }, null, 2));
+      console.log(
+        JSON.stringify({ database: databasePath(), embeddings: embeddingsAvailable(), counts, sync }, null, 2),
+      );
       return;
     }
 
