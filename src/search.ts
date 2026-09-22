@@ -9,7 +9,39 @@ export type SearchResult = {
   savedAt: string | null;
   score: number;
   snippet: string;
+  contentStatus: "full" | "partial";
+  archived: boolean;
+  stars: number | null;
+  lastPushedAt: string | null;
+  /** User-authored note explaining why this bookmark matters. */
+  context: string | null;
   trust: "untrusted_external_content";
+};
+
+const PRIMARY_CAPTURE_KIND: Record<string, string> = {
+  x_post: "x_post",
+  github_repository: "github_readme",
+};
+
+export type MediaResult = {
+  key: string;
+  type: string;
+  source: string | null;
+  url: string | null;
+  path: string | null;
+  contentType: string | null;
+  byteSize: number | null;
+  width: number | null;
+  height: number | null;
+  durationMillis: number | null;
+  downloadState: string | null;
+};
+
+export type ContentCapture = {
+  kind: string;
+  fetchedAt: string;
+  contentHash: string;
+  content: string;
 };
 
 export type ResourceResult = {
@@ -23,22 +55,39 @@ export type ResourceResult = {
   topics: string[];
   license: string | null;
   archived: boolean;
+  context: string | null;
   trust: "untrusted_external_content";
   capture: null | {
     fetchedAt: string;
     contentHash: string;
     content?: string;
   };
+  media: MediaResult[];
+  contents?: ContentCapture[];
 };
 
+const STOP_WORDS = new Set([
+  "a", "an", "and", "for", "from", "in", "into", "of", "on", "or", "over", "the", "to", "with",
+  "is", "are", "was", "be", "been", "being", "it", "its", "this", "that", "these", "those",
+  "i", "me", "my", "we", "our", "you", "your", "he", "she", "they", "them", "their",
+  "do", "does", "did", "can", "could", "should", "would", "will", "shall", "may", "might",
+  "what", "which", "who", "whom", "how", "when", "where", "why", "there", "here", "any", "some",
+  "das", "der", "die", "ein", "eine", "für", "im", "mit", "oder", "und", "von", "zu",
+  // Conversational filler that should never drive a search.
+  "ok", "okay", "nice", "cool", "yeah", "yep", "thanks", "thank", "please", "just",
+  "really", "maybe", "sure", "hello", "hey", "hi", "so", "well", "actually", "basically",
+]);
+
+export function tokenize(input: string): string[] {
+  // Match FTS5's unicode61 tokenizer: hyphens and underscores are separators.
+  const tokens = input.normalize("NFKC").match(/[\p{L}\p{N}]+/gu) ?? [];
+  return tokens.filter((token) => !STOP_WORDS.has(token.toLocaleLowerCase()));
+}
+
 export function toFtsQuery(input: string): string {
-  const stopWords = new Set([
-    "a", "an", "and", "for", "from", "in", "into", "of", "on", "or", "over", "the", "to", "with",
-    "das", "der", "die", "ein", "eine", "für", "im", "in", "mit", "oder", "und", "von", "zu",
-  ]);
-  const tokens = input.normalize("NFKC").match(/[\p{L}\p{N}_-]+/gu) ?? [];
-  const meaningful = tokens.filter((token) => !stopWords.has(token.toLocaleLowerCase()));
-  return meaningful.map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
+  return tokenize(input)
+    .map((token) => `"${token.replaceAll('"', '""')}"`)
+    .join(" OR ");
 }
 
 export function searchResources(
@@ -62,14 +111,42 @@ export function searchResources(
         WHERE s.resource_id = r.id AND s.unsaved_at IS NULL
       ) AS savedAt,
       bm25(resources_fts, 0.0, 10.0, 5.0, 3.0, 1.0, 2.0) AS score,
-      snippet(resources_fts, -1, '[', ']', ' … ', 24) AS snippet
+      snippet(resources_fts, -1, '[', ']', ' … ', 24) AS snippet,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM captures c
+        WHERE c.resource_id = r.id AND length(trim(c.normalized_content)) > 0
+      ) THEN 'full' ELSE 'partial' END AS contentStatus,
+      COALESCE(g.archived, 0) AS archived,
+      g.stars AS stars,
+      g.pushed_at AS lastPushedAt,
+      n.context AS context
     FROM resources_fts
     JOIN resources r ON r.id = resources_fts.resource_id
+    LEFT JOIN github_repositories g ON g.resource_id = r.id
+    LEFT JOIN resource_notes n ON n.resource_id = r.id
     WHERE resources_fts MATCH ?
     ORDER BY score ASC, savedAt DESC
     LIMIT ?
-  `).all(ftsQuery, limit) as Array<Omit<SearchResult, "trust">>;
-  return rows.map((row) => ({ ...row, trust: "untrusted_external_content" }));
+  `).all(ftsQuery, limit) as Array<{
+    id: number;
+    title: string;
+    url: string;
+    description: string | null;
+    language: string | null;
+    savedAt: string | null;
+    score: number;
+    snippet: string;
+    contentStatus: "full" | "partial";
+    archived: number;
+    stars: number | null;
+    lastPushedAt: string | null;
+    context: string | null;
+  }>;
+  return rows.map((row) => ({
+    ...row,
+    archived: row.archived === 1,
+    trust: "untrusted_external_content" as const,
+  }));
 }
 
 export function getResource(
@@ -79,21 +156,15 @@ export function getResource(
 ): ResourceResult | null {
   const row = db.prepare(`
     SELECT r.id, r.title, r.canonical_url AS url, r.author, r.description,
-           r.language, MAX(s.saved_at) AS savedAt,
+           r.language, r.resource_type AS resourceType, MAX(s.saved_at) AS savedAt,
            COALESCE(g.topics, '[]') AS topics,
            g.license_spdx AS license,
            COALESCE(g.archived, 0) AS archived,
-           c.fetched_at AS fetchedAt,
-           c.content_hash AS contentHash,
-           c.normalized_content AS content
+           n.context AS context
     FROM resources r
     LEFT JOIN saves s ON s.resource_id = r.id AND s.unsaved_at IS NULL
     LEFT JOIN github_repositories g ON g.resource_id = r.id
-    LEFT JOIN captures c ON c.id = (
-      SELECT c2.id FROM captures c2
-      WHERE c2.resource_id = r.id
-      ORDER BY c2.fetched_at DESC, c2.id DESC LIMIT 1
-    )
+    LEFT JOIN resource_notes n ON n.resource_id = r.id
     WHERE r.id = ?
     GROUP BY r.id
   `).get(id) as
@@ -104,13 +175,12 @@ export function getResource(
         author: string | null;
         description: string | null;
         language: string | null;
+        resourceType: string;
         savedAt: string | null;
         topics: string;
         license: string | null;
         archived: number;
-        fetchedAt: string | null;
-        contentHash: string | null;
-        content: string | null;
+        context: string | null;
       }
     | undefined;
   if (!row) return null;
@@ -123,6 +193,32 @@ export function getResource(
     topics = [];
   }
 
+  const primaryKind = PRIMARY_CAPTURE_KIND[row.resourceType] ?? null;
+  const primary = db.prepare(`
+    SELECT fetched_at AS fetchedAt, content_hash AS contentHash, normalized_content AS content
+    FROM captures
+    WHERE resource_id = ? AND (? IS NULL OR kind = ?)
+    ORDER BY fetched_at DESC, id DESC LIMIT 1
+  `).get(id, primaryKind, primaryKind) as
+    | { fetchedAt: string; contentHash: string; content: string }
+    | undefined;
+
+  const media = db.prepare(`
+    SELECT media_key AS key, type, source, url, local_path AS path,
+           content_type AS contentType, byte_size AS byteSize,
+           width, height, duration_millis AS durationMillis, download_state AS downloadState
+    FROM x_media WHERE resource_id = ? ORDER BY position, media_key
+  `).all(id) as MediaResult[];
+
+  const contents = includeContent
+    ? (db.prepare(`
+        SELECT kind, fetched_at AS fetchedAt, content_hash AS contentHash,
+               normalized_content AS content
+        FROM captures WHERE resource_id = ?
+        ORDER BY fetched_at DESC, id DESC
+      `).all(id) as ContentCapture[])
+    : undefined;
+
   return {
     id: row.id,
     title: row.title,
@@ -134,14 +230,16 @@ export function getResource(
     topics,
     license: row.license,
     archived: row.archived === 1,
+    context: row.context,
     trust: "untrusted_external_content",
-    capture:
-      row.fetchedAt && row.contentHash
-        ? {
-            fetchedAt: row.fetchedAt,
-            contentHash: row.contentHash,
-            ...(includeContent && row.content !== null ? { content: row.content } : {}),
-          }
-        : null,
+    capture: primary
+      ? {
+          fetchedAt: primary.fetchedAt,
+          contentHash: primary.contentHash,
+          ...(includeContent ? { content: primary.content } : {}),
+        }
+      : null,
+    media,
+    ...(contents ? { contents } : {}),
   };
 }

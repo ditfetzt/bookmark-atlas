@@ -1,15 +1,21 @@
 import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { refreshResourceFts, type AtlasDatabase } from "./db.ts";
 import { chunkMarkdown } from "./enrich.ts";
 
 const DEFAULT_MAX_FILE_BYTES = 64 * 1024 * 1024;
 
 type JsonObject = Record<string, unknown>;
+type JsonNode = JsonObject | string | number | boolean | null | JsonNode[];
 
 export type XImportOptions = {
   account?: string;
   maxFileBytes?: number;
+  tweetxvaultDir?: string;
+  /** Mark active saves missing from this import as unsaved. Use for a full collection import. */
+  reconcile?: boolean;
 };
 
 export type XImportResult = {
@@ -17,8 +23,18 @@ export type XImportResult = {
   total: number;
   imported: number;
   updated: number;
+  removed: number;
   skipped: number;
   missingSavedAt: number;
+};
+
+type NormalizedArticle = { title: string | null; body: string };
+
+type NormalizedLink = {
+  url: string;
+  title: string | null;
+  description: string | null;
+  siteName: string | null;
 };
 
 type NormalizedPost = {
@@ -33,6 +49,8 @@ type NormalizedPost = {
   conversationId: string | null;
   media: JsonObject[];
   outboundUrls: string[];
+  article: NormalizedArticle | null;
+  links: NormalizedLink[];
   raw: JsonObject;
 };
 
@@ -52,14 +70,14 @@ function string(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
-function nested(root: unknown, ...keys: string[]): unknown {
+function nested(root: unknown, ...keys: string[]): JsonNode | undefined {
   let current: unknown = root;
   for (const key of keys) {
     const value = object(current);
     if (!value) return undefined;
     current = value[key];
   }
-  return current;
+  return current as JsonNode | undefined;
 }
 
 function validDate(value: unknown): string | null {
@@ -89,6 +107,75 @@ function jsonObject(value: unknown): JsonObject | null {
   } catch {
     return null;
   }
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
+}
+
+function normalizeArticle(value: unknown): NormalizedArticle | null {
+  const article = object(value);
+  if (!article) return null;
+  const title = string(article.title);
+  const body = [string(article.summary_text), string(article.content_text)]
+    .filter((part): part is string => part !== null)
+    .join("\n\n")
+    .trim();
+  if (!title && !body) return null;
+  return { title, body };
+}
+
+function normalizeLinks(value: unknown): NormalizedLink[] {
+  if (!Array.isArray(value)) return [];
+  const links: NormalizedLink[] = [];
+  for (const candidate of value) {
+    const item = object(candidate);
+    if (!item) continue;
+    const resolved = object(item.resolved);
+    const url =
+      string(resolved?.canonical_url) ??
+      string(resolved?.final_url) ??
+      string(item.canonical_url) ??
+      string(item.expanded_url) ??
+      string(item.url);
+    if (!url) continue;
+    links.push({
+      url,
+      title: string(resolved?.title),
+      description: string(resolved?.description),
+      siteName: string(resolved?.site_name),
+    });
+  }
+  return links;
+}
+
+function nativeArticle(tweet: JsonObject): NormalizedArticle | null {
+  const article = object(nested(tweet, "article", "article_results", "result"));
+  if (!article) return null;
+  const title = string(article.title);
+  let body = string(article.content);
+  if (!body) {
+    const blocks = nested(article, "content_state", "blocks");
+    if (Array.isArray(blocks)) {
+      body = blocks
+        .map((block) => string(object(block)?.text))
+        .filter((value): value is string => value !== null)
+        .join("\n\n");
+    }
+  }
+  if (!title && !body) return null;
+  return { title, body: body ?? "" };
+}
+
+export function defaultTweetXVaultDir(): string {
+  if (process.env.BOOKMARK_ATLAS_TWEETXVAULT_DIR) return process.env.BOOKMARK_ATLAS_TWEETXVAULT_DIR;
+  return process.platform === "darwin"
+    ? join(homedir(), "Library", "Application Support", "tweetxvault")
+    : join(homedir(), ".local", "share", "tweetxvault");
+}
+
+function resolveMediaPath(baseDir: string, localPath: string | null): string | null {
+  return localPath ? resolve(baseDir, localPath) : null;
 }
 
 function entityUrls(tweet: JsonObject): string[] {
@@ -174,6 +261,8 @@ function normalizeNative(value: unknown): NormalizedPost | null {
     conversationId: string(nested(tweet, "legacy", "conversation_id_str")),
     media: nativeMedia(tweet),
     outboundUrls: entityUrls(tweet),
+    article: nativeArticle(tweet),
+    links: entityUrls(tweet).map((url) => ({ url, title: null, description: null, siteName: null })),
     raw: tweet,
   };
 }
@@ -198,6 +287,8 @@ function normalizeSiftlyExport(value: unknown): NormalizedPost | null {
     conversationId: null,
     media,
     outboundUrls: [],
+    article: null,
+    links: [],
     raw: bookmark,
   };
 }
@@ -232,6 +323,8 @@ function normalizeTweetXVault(value: unknown): NormalizedPost | null {
     conversationId: string(bookmark.conversation_id) ?? string(bookmark.conversationId),
     media,
     outboundUrls,
+    article: normalizeArticle(bookmark.article),
+    links: normalizeLinks(bookmark.urls),
     raw,
   };
 }
@@ -259,6 +352,8 @@ function normalizeApiV2(value: unknown, users: Map<string, JsonObject>, media: M
     conversationId: string(tweet.conversation_id),
     media: mediaItems,
     outboundUrls: [],
+    article: null,
+    links: [],
     raw: tweet,
   };
 }
@@ -356,7 +451,72 @@ function canonicalUrl(post: NormalizedPost): string {
   return `https://x.com/i/web/status/${post.id}`;
 }
 
-function importPost(db: AtlasDatabase, integrationId: number, post: NormalizedPost, source: string): "imported" | "updated" {
+function storeCapture(
+  db: AtlasDatabase,
+  resourceId: number,
+  kind: string,
+  sourceUrl: string,
+  text: string,
+  now: string,
+): void {
+  const contentHash = hash(text);
+  db.prepare(`
+    INSERT INTO captures (resource_id, kind, source_url, fetched_at, content_hash, normalized_content)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(resource_id, kind, content_hash) DO UPDATE SET fetched_at = excluded.fetched_at
+  `).run(resourceId, kind, sourceUrl, now, contentHash, text);
+  const capture = db.prepare(`
+    SELECT id FROM captures WHERE resource_id = ? AND kind = ? AND content_hash = ?
+  `).get(resourceId, kind, contentHash) as { id: number };
+  db.prepare("DELETE FROM chunks WHERE capture_id = ?").run(capture.id);
+  const insertChunk = db.prepare(`
+    INSERT INTO chunks (capture_id, ordinal, text, token_count, content_hash)
+    VALUES (?, ?, ?, ?, ?)
+  `);
+  for (const [ordinal, chunk] of chunkMarkdown(text).entries()) {
+    insertChunk.run(capture.id, ordinal, chunk, Math.ceil(chunk.length / 4), hash(chunk));
+  }
+}
+
+function persistMedia(db: AtlasDatabase, resourceId: number, media: JsonObject[], baseDir: string): void {
+  db.prepare("DELETE FROM x_media WHERE resource_id = ?").run(resourceId);
+  const insert = db.prepare(`
+    INSERT INTO x_media (
+      resource_id, media_key, type, source, article_id, position, url, thumbnail_url,
+      width, height, duration_millis, local_path, content_type, byte_size, sha256, download_state
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  media.forEach((item, index) => {
+    const download = object(item.download);
+    const localPath = string(download?.local_path);
+    insert.run(
+      resourceId,
+      string(item.media_key) ?? `${string(item.type) ?? "media"}-${index}`,
+      string(item.type) ?? "unknown",
+      string(item.source),
+      string(item.article_id),
+      numberOrNull(item.position) ?? index,
+      string(item.url),
+      string(item.thumbnail_url),
+      numberOrNull(item.width),
+      numberOrNull(item.height),
+      numberOrNull(item.duration_millis),
+      resolveMediaPath(baseDir, localPath),
+      string(download?.content_type),
+      numberOrNull(download?.byte_size),
+      string(download?.sha256),
+      string(download?.state),
+    );
+  });
+}
+
+function importPost(
+  db: AtlasDatabase,
+  integrationId: number,
+  post: NormalizedPost,
+  source: string,
+  mediaBaseDir: string,
+): "imported" | "updated" {
   const now = new Date().toISOString();
   const existing = db.prepare("SELECT resource_id AS resourceId FROM x_posts WHERE x_post_id = ?").get(post.id) as { resourceId: number } | undefined;
   const url = canonicalUrl(post);
@@ -409,22 +569,18 @@ function importPost(db: AtlasDatabase, integrationId: number, post: NormalizedPo
       raw_json = excluded.raw_json
   `).run(resource, post.id, post.authorId, post.authorHandle, post.authorName, post.postCreatedAt, post.conversationId, JSON.stringify(post.media), JSON.stringify(post.outboundUrls), JSON.stringify(post.raw));
 
-  const contentHash = hash(post.text);
-  db.prepare(`
-    INSERT INTO captures (resource_id, kind, source_url, fetched_at, content_hash, normalized_content)
-    VALUES (?, 'x_post', ?, ?, ?, ?)
-    ON CONFLICT(resource_id, kind, content_hash) DO UPDATE SET fetched_at = excluded.fetched_at
-  `).run(resource, url, now, contentHash, post.text);
-  const capture = db.prepare(`
-    SELECT id FROM captures WHERE resource_id = ? AND kind = 'x_post' AND content_hash = ?
-  `).get(resource, contentHash) as { id: number };
-  db.prepare("DELETE FROM chunks WHERE capture_id = ?").run(capture.id);
-  const insertChunk = db.prepare(`
-    INSERT INTO chunks (capture_id, ordinal, text, token_count, content_hash)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  for (const [ordinal, chunk] of chunkMarkdown(post.text).entries()) {
-    insertChunk.run(capture.id, ordinal, chunk, Math.ceil(chunk.length / 4), hash(chunk));
+  persistMedia(db, resource, post.media, mediaBaseDir);
+  storeCapture(db, resource, "x_post", url, post.text, now);
+  if (post.article) {
+    const articleText = [post.article.title, post.article.body].filter(Boolean).join("\n\n").trim();
+    if (articleText) storeCapture(db, resource, "x_article", url, articleText, now);
+  }
+  if (post.links.length) {
+    const linkText = post.links
+      .map((link) => [link.title, link.description, link.url].filter(Boolean).join(" — "))
+      .join("\n\n")
+      .trim();
+    if (linkText) storeCapture(db, resource, "x_link", url, linkText, now);
   }
   refreshResourceFts(db, resource);
   return existing || existingUrl ? "updated" : "imported";
@@ -433,6 +589,7 @@ function importPost(db: AtlasDatabase, integrationId: number, post: NormalizedPo
 export function importXJson(db: AtlasDatabase, input: unknown, options: XImportOptions = {}): XImportResult {
   const parsed = parseInput(input);
   const integrationId = ensureIntegration(db, options.account ?? "json-import");
+  const mediaBaseDir = options.tweetxvaultDir ?? defaultTweetXVaultDir();
   const startedAt = new Date().toISOString();
   const runId = Number(db.prepare(`
     INSERT INTO sync_runs (integration_id, status, started_at)
@@ -440,8 +597,10 @@ export function importXJson(db: AtlasDatabase, input: unknown, options: XImportO
   `).run(integrationId, startedAt).lastInsertRowid);
   let imported = 0;
   let updated = 0;
+  let removed = 0;
   let skipped = 0;
   let missingSavedAt = 0;
+  const seen = new Set<string>();
 
   db.exec("BEGIN IMMEDIATE");
   try {
@@ -450,15 +609,29 @@ export function importXJson(db: AtlasDatabase, input: unknown, options: XImportO
         skipped += 1;
         continue;
       }
+      seen.add(post.id);
       if (!post.savedAt) missingSavedAt += 1;
-      const outcome = importPost(db, integrationId, post, parsed.source);
+      const outcome = importPost(db, integrationId, post, parsed.source, mediaBaseDir);
       if (outcome === "imported") imported += 1;
       else updated += 1;
     }
+    if (options.reconcile) {
+      const active = db
+        .prepare("SELECT id, provider_external_id FROM saves WHERE integration_id = ? AND unsaved_at IS NULL")
+        .all(integrationId) as Array<{ id: number; provider_external_id: string }>;
+      const now = new Date().toISOString();
+      const markRemoved = db.prepare("UPDATE saves SET unsaved_at = ?, updated_at = ? WHERE id = ?");
+      for (const save of active) {
+        if (!seen.has(save.provider_external_id)) {
+          markRemoved.run(now, now, save.id);
+          removed += 1;
+        }
+      }
+    }
     db.prepare(`
       UPDATE sync_runs SET status = 'completed', completed_at = ?,
-        imported_count = ?, updated_count = ? WHERE id = ?
-    `).run(new Date().toISOString(), imported, updated, runId);
+        imported_count = ?, updated_count = ?, removed_count = ? WHERE id = ?
+    `).run(new Date().toISOString(), imported, updated, removed, runId);
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
@@ -468,7 +641,7 @@ export function importXJson(db: AtlasDatabase, input: unknown, options: XImportO
     throw error;
   }
 
-  return { format: parsed.format, total: parsed.posts.length, imported, updated, skipped, missingSavedAt };
+  return { format: parsed.format, total: parsed.posts.length, imported, updated, removed, skipped, missingSavedAt };
 }
 
 export function importXJsonFile(db: AtlasDatabase, file: string, options: XImportOptions = {}): XImportResult {

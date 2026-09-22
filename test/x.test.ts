@@ -33,6 +33,7 @@ test("imports a Siftly native capture idempotently and indexes expanded URLs", (
     total: 1,
     imported: 1,
     updated: 0,
+    removed: 0,
     skipped: 0,
     missingSavedAt: 1,
   });
@@ -43,6 +44,32 @@ test("imports a Siftly native capture idempotently and indexes expanded URLs", (
   assert.match((db.prepare("SELECT normalized_content AS content FROM captures").get() as { content: string }).content, /example\.com\/article/);
   assert.equal((db.prepare("SELECT language FROM resources").get() as { language: string }).language, "en");
   assert.equal((db.prepare("SELECT status FROM sync_runs ORDER BY id DESC LIMIT 1").get() as { status: string }).status, "completed");
+  db.close();
+});
+
+test("reconciles removed bookmarks only when a full collection is imported", () => {
+  const db = openDatabase(":memory:");
+  const post = (id: string) => ({
+    tweet_id: id,
+    text: `post ${id}`,
+    author_username: "reconciler",
+    created_at: "2026-08-01T00:00:00Z",
+    added_at: "2026-09-01T00:00:00Z",
+    raw_json: JSON.stringify({ rest_id: id }),
+  });
+
+  const first = importXJson(db, [post("1"), post("2")], { account: "x", reconcile: true });
+  assert.equal(first.removed, 0);
+
+  const second = importXJson(db, [post("1")], { account: "x", reconcile: true });
+  assert.equal(second.removed, 1);
+  assert.equal(
+    (db.prepare("SELECT COUNT(*) AS count FROM saves WHERE unsaved_at IS NULL").get() as { count: number }).count,
+    1,
+  );
+
+  const partial = importXJson(db, [post("2")], { account: "x" });
+  assert.equal(partial.removed, 0);
   db.close();
 });
 
@@ -96,6 +123,88 @@ test("imports a TweetXVault JSON export", () => {
   assert.equal((db.prepare("SELECT author_handle AS handle FROM x_posts").get() as { handle: string }).handle, "archiver");
   assert.equal((db.prepare("SELECT saved_at AS savedAt FROM saves").get() as { savedAt: string }).savedAt, "2026-09-01T00:00:00.000Z");
   assert.match((db.prepare("SELECT outbound_urls AS urls FROM x_posts").get() as { urls: string }).urls, /example.com\/archive/);
+  db.close();
+});
+
+test("persists media, article text, and link unfurls for a TweetXVault export", () => {
+  const db = openDatabase(":memory:");
+  const result = importXJson(
+    db,
+    [
+      {
+        tweet_id: "90",
+        text: "See the writeup",
+        author_username: "pipeline",
+        created_at: "2026-08-01T00:00:00Z",
+        added_at: "2026-09-01T00:00:00Z",
+        article: {
+          article_id: "a1",
+          title: "Pipeline deep dive",
+          summary_text: "How the media pipeline works",
+          content_text: "Full article body about processing every bookmark",
+        },
+        media: [
+          {
+            media_key: "3_90",
+            type: "photo",
+            source: "article_media",
+            position: 0,
+            url: "https://pbs.twimg.com/media/x.jpg",
+            download: {
+              state: "done",
+              local_path: "media/90/3_90.jpg",
+              content_type: "image/jpeg",
+              byte_size: 1234,
+              sha256: "abc",
+            },
+          },
+          {
+            media_key: "13_90",
+            type: "video",
+            source: "tweet_media",
+            position: 1,
+            url: "https://video.twimg.com/x.mp4",
+            download: { state: "pending", local_path: null, content_type: null },
+          },
+        ],
+        urls: [
+          {
+            expanded_url: "https://example.com/guide",
+            resolved: {
+              canonical_url: "https://example.com/guide",
+              title: "Guide",
+              description: "A useful guide",
+              site_name: "Example",
+            },
+          },
+        ],
+        raw_json: JSON.stringify({ rest_id: "90" }),
+      },
+    ],
+    { tweetxvaultDir: "/tmp/tv" },
+  );
+
+  assert.equal(result.imported, 1);
+  const media = (
+    db.prepare("SELECT type, local_path AS path FROM x_media ORDER BY position").all() as Array<{
+      type: string;
+      path: string | null;
+    }>
+  ).map((row) => ({ type: row.type, path: row.path }));
+  assert.deepEqual(media, [
+    { type: "photo", path: "/tmp/tv/media/90/3_90.jpg" },
+    { type: "video", path: null },
+  ]);
+  const kinds = db.prepare("SELECT kind FROM captures ORDER BY kind").all() as Array<{ kind: string }>;
+  assert.deepEqual(kinds.map((row) => row.kind), ["x_article", "x_link", "x_post"]);
+  assert.match(
+    (db.prepare("SELECT normalized_content AS content FROM captures WHERE kind = 'x_link'").get() as { content: string }).content,
+    /A useful guide/,
+  );
+  assert.equal(
+    (db.prepare("SELECT COUNT(*) AS count FROM resources_fts WHERE resources_fts MATCH 'pipeline'").get() as { count: number }).count,
+    1,
+  );
   db.close();
 });
 

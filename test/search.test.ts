@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
-import { openDatabase } from "../src/db.ts";
+import { openDatabase, refreshResourceFts } from "../src/db.ts";
 import { getResource, searchResources, toFtsQuery } from "../src/search.ts";
 
 test("normalizes user input into a safe FTS query", () => {
@@ -22,6 +22,20 @@ test("finds indexed repository metadata without network or LLM", () => {
   assert.equal(first.title, "example/local-agent");
   assert.match(first.snippet, /local/i);
   assert.equal(first.trust, "untrusted_external_content");
+  db.close();
+});
+
+test("returns a note as context and indexes it for search", () => {
+  const db = openDatabase(":memory:");
+  seed(db);
+  db.prepare(
+    "INSERT INTO resource_notes (resource_id, context, updated_at) VALUES (1, ?, ?)",
+  ).run("The canonical blueprint for this project", "2026-01-01T00:00:00Z");
+  refreshResourceFts(db, 1);
+
+  const resource = getResource(db, 1);
+  assert.equal(resource?.context, "The canonical blueprint for this project");
+  assert.ok(searchResources(db, "canonical blueprint", 5).some((hit) => hit.id === 1));
   db.close();
 });
 

@@ -18,13 +18,6 @@ export function openDatabase(path: string): AtlasDatabase {
   return db;
 }
 
-export function openReadOnlyDatabase(path: string): AtlasDatabase {
-  const db = new DatabaseSync(resolve(path), { readOnly: true });
-  db.exec("PRAGMA query_only = ON");
-  db.exec("PRAGMA busy_timeout = 5000");
-  return db;
-}
-
 function migrate(db: AtlasDatabase): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_meta (
@@ -99,6 +92,26 @@ function migrate(db: AtlasDatabase): void {
       raw_json TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS x_media (
+      resource_id INTEGER NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+      media_key TEXT NOT NULL,
+      type TEXT NOT NULL,
+      source TEXT,
+      article_id TEXT,
+      position INTEGER NOT NULL DEFAULT 0,
+      url TEXT,
+      thumbnail_url TEXT,
+      width INTEGER,
+      height INTEGER,
+      duration_millis INTEGER,
+      local_path TEXT,
+      content_type TEXT,
+      byte_size INTEGER,
+      sha256 TEXT,
+      download_state TEXT,
+      PRIMARY KEY(resource_id, media_key)
+    );
+
     CREATE TABLE IF NOT EXISTS sync_checkpoints (
       integration_id INTEGER PRIMARY KEY REFERENCES integrations(id),
       etag TEXT,
@@ -154,6 +167,24 @@ function migrate(db: AtlasDatabase): void {
       PRIMARY KEY(resource_id, kind)
     );
 
+    CREATE TABLE IF NOT EXISTS resource_notes (
+      resource_id INTEGER PRIMARY KEY REFERENCES resources(id) ON DELETE CASCADE,
+      context TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS chunk_embeddings (
+      chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+      dim INTEGER NOT NULL,
+      vector BLOB NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS embedding_cache (
+      hash TEXT PRIMARY KEY,
+      dim INTEGER NOT NULL,
+      vector BLOB NOT NULL
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS resources_fts USING fts5(
       resource_id UNINDEXED,
       title,
@@ -190,6 +221,39 @@ function migrate(db: AtlasDatabase): void {
     `);
     rebuildMissingFtsRows(db);
   }
+
+  // Term document-frequency table for IDF weighting in recall.
+  db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS resources_vocab USING fts5vocab(resources_fts, 'row')");
+
+  // Chunk-level index (external content over `chunks`). Triggers keep it in
+  // sync; the rebuild runs only the first time the table is created.
+  const chunksFtsExists = db
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chunks_fts'")
+    .get();
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+      text,
+      content = 'chunks',
+      content_rowid = 'id',
+      tokenize = 'unicode61 remove_diacritics 2'
+    );
+
+    CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON chunks BEGIN
+      INSERT INTO chunks_fts (rowid, text) VALUES (new.id, new.text);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON chunks BEGIN
+      INSERT INTO chunks_fts (chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    END;
+
+    CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON chunks BEGIN
+      INSERT INTO chunks_fts (chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+      INSERT INTO chunks_fts (rowid, text) VALUES (new.id, new.text);
+    END;
+  `);
+  if (!chunksFtsExists) {
+    db.exec("INSERT INTO chunks_fts (chunks_fts) VALUES ('rebuild')");
+  }
 }
 
 function rebuildMissingFtsRows(db: AtlasDatabase): void {
@@ -206,15 +270,26 @@ export function refreshResourceFts(db: AtlasDatabase, resourceId: number): void 
   const resource = db.prepare(`
     SELECT r.title, r.description, r.language,
            COALESCE(g.topics, '[]') AS topics,
+           COALESCE(n.context, '') AS note,
            COALESCE((
-             SELECT c.normalized_content
-             FROM captures c
-             WHERE c.resource_id = r.id
-             ORDER BY c.fetched_at DESC, c.id DESC
-             LIMIT 1
+             SELECT group_concat(part, char(10) || char(10))
+             FROM (
+               SELECT (
+                 SELECT c2.normalized_content
+                 FROM captures c2
+                 WHERE c2.resource_id = r.id AND c2.kind = c.kind
+                 ORDER BY c2.fetched_at DESC, c2.id DESC
+                 LIMIT 1
+               ) AS part
+               FROM captures c
+               WHERE c.resource_id = r.id
+               GROUP BY c.kind
+             )
+             WHERE part IS NOT NULL AND length(trim(part)) > 0
            ), '') AS content
     FROM resources r
     LEFT JOIN github_repositories g ON g.resource_id = r.id
+    LEFT JOIN resource_notes n ON n.resource_id = r.id
     WHERE r.id = ?
   `).get(resourceId) as
     | {
@@ -222,6 +297,7 @@ export function refreshResourceFts(db: AtlasDatabase, resourceId: number): void 
         description: string | null;
         language: string | null;
         topics: string;
+        note: string;
         content: string;
       }
     | undefined;
@@ -246,7 +322,7 @@ export function refreshResourceFts(db: AtlasDatabase, resourceId: number): void 
     resource.description ?? "",
     topics,
     resource.language ?? "",
-    resource.content,
+    [resource.note, resource.content].filter((part) => part.trim()).join("\n\n"),
   );
 }
 
