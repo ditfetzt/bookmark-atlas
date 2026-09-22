@@ -13,14 +13,15 @@
     "sync:github": "node src/cli.ts sync github",
     "enrich:github": "node src/cli.ts enrich github-readmes",
     "import:x": "node src/cli.ts import x-json",
-    "benchmark:retrieval": "node src/cli.ts benchmark retrieval",
-    "snapshot:build": "node src/cli.ts snapshot build",
     "search": "node src/cli.ts search",
     "status": "node src/cli.ts status",
+    "mcp": "node src/cli.ts mcp",
     "test": "node --test --test-concurrency=1",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.87.0",
+    "@earendil-works/pi-tui": "^0.87.0",
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0"
   }
