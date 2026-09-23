@@ -89,6 +89,7 @@ const CTRL_D = "\x04";
 const CTRL_T = "\x14";
 const CTRL_S = "\x13";
 const CTRL_L = "\x0c";
+const CTRL_X = "\x18";
 const F1 = "\x1bOP";
 const ESCAPE = "\x1b";
 
@@ -252,7 +253,25 @@ test("enter still inserts from the reading pane", () => {
   const list = paletteOf(["Bookmark one"]);
   list.handleInput(CTRL_E);
   list.handleInput("\r");
-  assert.deepEqual(list.actions, [{ action: "insert", id: 1 }]);
+  assert.deepEqual(list.actions, [{ action: "insert", ids: [1] }]);
+});
+
+test("ctrl+x marks rows so enter inserts them together", () => {
+  const list = paletteOf(["one", "two", "three"]);
+  list.handleInput(CTRL_X);
+  list.handleInput("\x1b[B"); // down
+  list.handleInput(CTRL_X);
+  list.handleInput("\x1b[B"); // down again, to prove the selection is not what is inserted
+  list.handleInput("\r");
+  assert.deepEqual(list.actions, [{ action: "insert", ids: [1, 2] }]);
+});
+
+test("ctrl+x twice unmarks, and enter falls back to the selection", () => {
+  const list = paletteOf(["one", "two"]);
+  list.handleInput(CTRL_X);
+  list.handleInput(CTRL_X);
+  list.handleInput("\r");
+  assert.deepEqual(list.actions, [{ action: "insert", ids: [1] }]);
 });
 
 test("ctrl+n writes a note through the CLI, and esc cancels without writing", async () => {

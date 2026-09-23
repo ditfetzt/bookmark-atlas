@@ -160,7 +160,14 @@ type Media = { type: string; path: string | null; contentType: string | null };
 
 type BookmarkDetail = Bookmark & { content: string; media: Media[] };
 
-type Action = { action: "cancel" } | { action: "insert"; id: number };
+type Action = { action: "cancel" } | { action: "insert"; ids: number[] };
+
+/** The text one bookmark contributes to the editor when inserted. */
+function insertText(detail: BookmarkDetail): string {
+	return [detail.title, detail.url, detail.context ?? "", detail.content.trim().slice(0, 3000)]
+		.filter(Boolean)
+		.join("\n\n");
+}
 
 function openDb(): DatabaseSync {
 	return new DatabaseSync(DB_PATH, { readOnly: true });
@@ -336,6 +343,8 @@ export class BookmarkPalette implements Component, Focusable {
 	private topic: string | null = null;
 	private topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null = null;
 	private reading = false;
+	/** Bookmarks marked for a combined insert. */
+	private marked = new Set<number>();
 	/** The full library, held while the list is pivoted to a bookmark's relations. */
 	private relatedBase: Bookmark[] | null = null;
 	private noteEdit: { id: number; input: Input } | null = null;
@@ -529,6 +538,16 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		this.images.set(bookmark.id, image);
 		return image;
+	}
+
+	/** Marked bookmarks in view order, or just the selection when nothing is marked. */
+	private insertTargets(): number[] {
+		const marked = this.filtered
+			.filter((bookmark) => this.marked.has(bookmark.id))
+			.map((bookmark) => bookmark.id);
+		if (marked.length > 0) return marked;
+		const bookmark = this.selectedBookmark();
+		return bookmark ? [bookmark.id] : [];
 	}
 
 	/**
@@ -744,7 +763,8 @@ export class BookmarkPalette implements Component, Focusable {
 		if (matchesKey(data, "home")) return scrollTo(0);
 		if (matchesKey(data, "end")) return scrollTo(maxOffset);
 		if (matchesKey(data, "return") && bookmark) {
-			this.done({ action: "insert", id: bookmark.id });
+			const ids = this.insertTargets();
+			if (ids.length > 0) this.done({ action: "insert", ids });
 		}
 	}
 
@@ -820,6 +840,15 @@ export class BookmarkPalette implements Component, Focusable {
 			void this.toggleRelated();
 			return;
 		}
+		if (matchesKey(data, "ctrl+x")) {
+			const bookmark = this.selectedBookmark();
+			if (bookmark) {
+				if (this.marked.has(bookmark.id)) this.marked.delete(bookmark.id);
+				else this.marked.add(bookmark.id);
+				this.requestRender?.();
+			}
+			return;
+		}
 		// Jump navigation. macOS sends Fn+←/→ as home/end and Fn+↑/↓ as pageUp/pageDown;
 		// Cmd+↑/↓ arrives as super+up/down only when the terminal forwards the modifier.
 		if (matchesKey(data, "home")) {
@@ -847,8 +876,8 @@ export class BookmarkPalette implements Component, Focusable {
 			return;
 		}
 		if (matchesKey(data, "return")) {
-			const bookmark = this.selectedBookmark();
-			if (bookmark) this.done({ action: "insert", id: bookmark.id });
+			const ids = this.insertTargets();
+			if (ids.length > 0) this.done({ action: "insert", ids });
 			return;
 		}
 		const bookmark = this.selectedBookmark();
@@ -950,6 +979,7 @@ export class BookmarkPalette implements Component, Focusable {
 			key("ctrl+d", "only what was added in the last 7 days"),
 			key("ctrl+t", "filter by topic"),
 			key("ctrl+l", "pivot the list to what is related to this bookmark"),
+			key("ctrl+x", "mark this bookmark, so enter inserts several at once"),
 			key("ctrl+s", "sort: newest, oldest, stars, A-Z (best match appears once you search)"),
 			"",
 			theme.fg("accent", "Act"),
@@ -1068,6 +1098,7 @@ export class BookmarkPalette implements Component, Focusable {
 				.join(" ");
 			const badge =
 				(media ? theme.fg("dim", `  ${media}`) : "") +
+				(this.marked.has(bookmark.id) ? theme.fg("accent", " ●") : "") +
 				(bookmark.context ? theme.fg("accent", " 📝") : "");
 			const title = truncateToWidth(
 				bookmark.title.replace(/\s+/g, " "),
@@ -1148,7 +1179,9 @@ export class BookmarkPalette implements Component, Focusable {
 					? "  enter save note · esc cancel"
 					: reading
 						? "  ↑↓ scroll · enter insert · esc back · ? help"
-						: "  ↑↓ move · enter insert · ctrl+e read · ctrl+n note · ctrl+l related · esc close",
+						: this.marked.size > 0
+							? `  ${this.marked.size} marked · enter insert all · ctrl+x unmark · esc close`
+							: "  ↑↓ move · enter insert · ctrl+e read · ctrl+n note · ctrl+l related · esc close",
 			),
 		);
 		return lines;
@@ -1186,11 +1219,17 @@ export default function (pi: ExtensionAPI) {
 				{ overlay: true, overlayOptions: { anchor: "center", width: "85%", maxHeight: "90%" } },
 			);
 			if (result.action !== "insert") return;
-			const detail = loadDetail(result.id);
-			if (!detail) return;
-			const excerpt = detail.content.trim().slice(0, 4000);
-			ctx.ui.setEditorText([detail.title, detail.url, excerpt].filter(Boolean).join("\n\n"));
-			ctx.ui.notify(`Inserted bookmark #${detail.id}`, "info");
+			const details = result.ids
+				.map((id) => loadDetail(id))
+				.filter((detail): detail is BookmarkDetail => detail !== null);
+			if (details.length === 0) return;
+			ctx.ui.setEditorText(details.map(insertText).join("\n\n---\n\n"));
+			ctx.ui.notify(
+				details.length === 1
+					? `Inserted bookmark #${details[0]?.id}`
+					: `Inserted ${details.length} bookmarks`,
+				"info",
+			);
 		},
 	});
 
@@ -1247,19 +1286,17 @@ export default function (pi: ExtensionAPI) {
 				{ overlay: true, overlayOptions: { anchor: "center", width: "85%", maxHeight: "90%" } },
 			);
 			if (chosen.action !== "insert") return;
-			const detail = loadDetail(chosen.id);
-			if (!detail) return;
-			ctx.ui.setEditorText(
-				[
-					detail.title,
-					detail.url,
-					detail.context ?? "",
-					detail.content.trim().slice(0, 3000),
-				]
-					.filter(Boolean)
-					.join("\n\n"),
+			const chosenDetails = chosen.ids
+				.map((id) => loadDetail(id))
+				.filter((detail): detail is BookmarkDetail => detail !== null);
+			if (chosenDetails.length === 0) return;
+			ctx.ui.setEditorText(chosenDetails.map(insertText).join("\n\n---\n\n"));
+			ctx.ui.notify(
+				chosenDetails.length === 1
+					? `Consult: inserted bookmark #${chosenDetails[0]?.id}`
+					: `Consult: inserted ${chosenDetails.length} bookmarks`,
+				"info",
 			);
-			ctx.ui.notify(`Consult: inserted bookmark #${detail.id}`, "info");
 		},
 	});
 

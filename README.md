@@ -172,7 +172,7 @@ Media files are never copied. `x_media.local_path` points into TweetXVault's med
 /bookmarks local-first agents
 ```
 
-Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+a` hide archived repositories, `ctrl+d` show only the last seven days, `ctrl+t` filter by topic, `ctrl+l` pivot the list to what is related to the selected bookmark, `ctrl+s` cycle sort (newest → oldest → stars → A–Z, plus best match once you have typed a query), `ctrl+r` fetch new bookmarks in the background, `ctrl+e` read the full text, `ctrl+n` write a note, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
+Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+a` hide archived repositories, `ctrl+d` show only the last seven days, `ctrl+t` filter by topic, `ctrl+l` pivot the list to what is related to the selected bookmark, `ctrl+s` cycle sort (newest → oldest → stars → A–Z, plus best match once you have typed a query), `ctrl+r` fetch new bookmarks in the background, `ctrl+e` read the full text, `ctrl+n` write a note, `ctrl+x` mark a bookmark so `enter` inserts several at once, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
 
 Each row is numbered by its position in the current view, so the number stays stable while you scroll, filter, or sort.
 
@@ -185,6 +185,8 @@ X bookmarks carry no save date from TweetXVault, so the date sorts and the date 
 `ctrl+e` opens a reading pane: the list and the image give way to the full README, post, or article text, wrapped and scrolled with `↑↓` (a page at a time with `Fn+↑`/`Fn+↓`). `esc` returns to the list without closing the palette. The overlay keeps the same height, so nothing jumps when you toggle it.
 
 `ctrl+l` pivots the list to what is related to the selected bookmark, each row showing why it matched (`topic:mlx`, or a shared distinctive word). Press it again to put the whole library back. The same ranking is available to agents as the `related_bookmarks` MCP tool and to scripts as `related <id>`.
+
+`ctrl+x` marks a bookmark and `enter` then inserts every marked one together, separated by `---`, in the order they appear — so one prompt can point an agent at a set of sources instead of one. Marked rows carry a dot next to the note glyph. An inserted bookmark brings its note along, since that is your own judgement about why it is worth reading.
 
 `ctrl+r` runs `sync github`, `collect x --fast`, and `enrich github-readmes` in the background — the list stays usable and reloads in place when they finish, with a per-source count in the footer. A source that fails (no TweetXVault install, no GitHub token) is reported and does not stop the others.
 
