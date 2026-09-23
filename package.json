@@ -1,13 +1,50 @@
 {
   "name": "bookmark-atlas",
   "version": "0.1.0",
-  "private": true,
+  "description": "Local SQLite knowledge base for your GitHub stars and X bookmarks, with full-text search, a CLI, an MCP server, and a pi search palette.",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "bookmarks",
+    "github-stars",
+    "mcp",
+    "sqlite",
+    "fts5",
+    "knowledge-base"
+  ],
+  "license": "MIT",
+  "author": "Mæxim (https://github.com/ditfetzt)",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ditfetzt/bookmark-atlas.git"
+  },
+  "homepage": "https://github.com/ditfetzt/bookmark-atlas#readme",
+  "bugs": {
+    "url": "https://github.com/ditfetzt/bookmark-atlas/issues"
+  },
   "bin": {
     "bookmark-atlas": "./src/cli.ts"
   },
   "engines": {
     "node": ">=24"
+  },
+  "files": [
+    "src/",
+    "extensions/",
+    "skills/",
+    "scripts/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions/bookmark-atlas/index.ts"
+    ],
+    "skills": [
+      "./skills/bookmark-atlas"
+    ]
   },
   "scripts": {
     "sync:github": "node src/cli.ts sync github",
@@ -17,7 +54,12 @@
     "status": "node src/cli.ts status",
     "mcp": "node src/cli.ts mcp",
     "test": "node --test --test-concurrency=1",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.87.0",

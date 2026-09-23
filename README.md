@@ -2,13 +2,44 @@
 
 Bookmark Atlas turns your starred bookmarks into a local, searchable knowledge base for coding agents. It stores GitHub stars and X bookmarks in SQLite with full-text search, and exposes them through two read-only interfaces: a **CLI** and an **MCP server**.
 
-There is no web dashboard, no hosted API, and no background service. Everything runs on your machine against `data/bookmarks.db`.
+There is no web dashboard, no hosted API, and no background service. Everything runs on your machine against `data/bookmarks.db`. There are no runtime dependencies — only Node's standard library and its built-in SQLite.
+
+## Install
+
+As a [pi](https://pi.dev) package, which brings the `/bookmarks` palette extension and the agent skill:
+
+```bash
+pi install npm:bookmark-atlas
+```
+
+As a CLI:
+
+```bash
+npm install -g bookmark-atlas
+# or, without installing:
+npx bookmark-atlas status
+```
+
+From source:
+
+```bash
+git clone https://github.com/ditfetzt/bookmark-atlas.git
+cd bookmark-atlas
+npm install
+node src/cli.ts status
+```
+
+Whichever route you take, point `BOOKMARK_ATLAS_DB` at a path you own before the first sync if you do not want the database under the install directory:
+
+```bash
+export BOOKMARK_ATLAS_DB="$HOME/.local/share/bookmark-atlas/bookmarks.db"
+```
 
 ## Requirements
 
 - Node.js 24 or newer (uses the built-in `node:sqlite` with FTS5)
 - GitHub CLI authenticated with `gh auth login`, or `BOOKMARK_ATLAS_GITHUB_TOKEN`
-- Optional: [TweetXVault](https://github.com/) on `PATH` for `collect x`, or a browser bridge for `capture x`
+- Optional: TweetXVault on `PATH` for `collect x`, or a browser bridge for `capture x`
 
 The GitHub importer resolves credentials in this order:
 
@@ -199,13 +230,23 @@ The extension registers exactly two commands: `/bookmarks` and `/consult [focus]
 Enable it with either:
 
 ```bash
-# symlink: resolves the repo's data/bookmarks.db automatically
-ln -s "$PWD/extensions/bookmark-atlas" ~/.pi/agent/extensions/bookmark-atlas
+# the published package: extension and skill together
+pi install npm:bookmark-atlas
 
-# or install it as a package, then point it at the database explicitly
-pi install ./extensions/bookmark-atlas
-BOOKMARK_ATLAS_DB="$PWD/data/bookmarks.db" pi
+# a local checkout, by symlink — resolves the repo's data/bookmarks.db itself
+ln -s "$PWD/extensions/bookmark-atlas" ~/.pi/agent/extensions/bookmark-atlas
 ```
+
+Installed from npm, the extension defaults its database to inside the package
+directory, so set the path explicitly:
+
+```bash
+BOOKMARK_ATLAS_DB="$HOME/.local/share/bookmark-atlas/bookmarks.db" pi
+```
+
+The package also ships an agent skill at `skills/bookmark-atlas/`, which
+teaches an agent to run recall, consult, and search against the same database
+without being told the schema.
 
 ## Environment
 
@@ -216,3 +257,16 @@ BOOKMARK_ATLAS_DB="$PWD/data/bookmarks.db" pi
 | `BOOKMARK_ATLAS_TWEETXVAULT_BIN` | TweetXVault executable (default `tweetxvault`) |
 | `BOOKMARK_ATLAS_TWEETXVAULT_DIR` | TweetXVault data dir, used to resolve media paths (default `~/Library/Application Support/tweetxvault`) |
 | `BOOKMARK_ATLAS_X_CAPTURE_TOKEN` | Required token for `capture x` |
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md)
+for setup and the checks a pull request is expected to pass. Security issues
+should go through [SECURITY.md](SECURITY.md), not a public issue.
+
+`data/` is gitignored on purpose: it holds your bookmarks and the captured text
+of everything you saved. Never commit it.
+
+## License
+
+[MIT](LICENSE) © Mæxim

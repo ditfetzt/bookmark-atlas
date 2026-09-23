@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # actions/setup-node v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+  package:
+    name: package tarball
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      # actions/setup-node v7.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm pack --dry-run --json > /tmp/pack.json
+      - name: Refuse to ship data or tests
+        run: |
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const raw = readFileSync("/tmp/pack.json", "utf8");
+            const parsed = JSON.parse(raw);
+            // npm <11 emits an array, npm >=11 an object keyed by name.
+            const pkg = Array.isArray(parsed)
+              ? parsed[0]
+              : Object.values(parsed)[0];
+            const paths = pkg.files.map((f) => f.path);
+            const blocked = ["data/", "test/", ".pi/"];
+            const hit = (p) => blocked.some((b) => p.startsWith(b));
+            const bad = paths.filter(hit);
+            if (bad.length > 0) {
+              console.error("refusing to publish:", bad.join(", "));
+              process.exit(1);
+            }
+            if (!paths.includes("LICENSE")) {
+              console.error("LICENSE missing from tarball");
+              process.exit(1);
+            }
+            console.log(`${paths.length} files, no data/ or test/ entries`);
+          '

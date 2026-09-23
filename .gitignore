@@ -2,3 +2,9 @@ data/
 dist/
 node_modules/
 .DS_Store
+
+# Local agent/editor tooling configuration, not part of the project.
+.pi/
+
+# npm pack output
+*.tgz
