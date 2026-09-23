@@ -4,6 +4,8 @@ import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
 import { recall } from "./recall.ts";
 import { buildEmbeddings, embedQuery, embeddingsAvailable } from "./embeddings.ts";
+import { collectStage } from "./stage.ts";
+import { recordUsage, usageCounts } from "./usage.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile } from "./x.ts";
 import { collectXBookmarks } from "./collector.ts";
@@ -15,13 +17,27 @@ function optionValue(args: string[], name: string): string | undefined {
   return index >= 0 ? args[index + 1] : undefined;
 }
 
+// Only these flags consume the next argument. Boolean flags (--stage, --fast,
+// --semantic, --clear, ...) must not swallow the positional text that follows.
+const VALUE_FLAGS = new Set([
+  "--limit",
+  "--repo",
+  "--account",
+  "--concurrency",
+  "--port",
+  "--cases",
+]);
+
 function positional(args: string[]): string[] {
   const result: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
     if (argument === undefined) break;
-    if (argument.startsWith("--")) index += 1;
-    else result.push(argument);
+    if (argument.startsWith("--")) {
+      if (VALUE_FLAGS.has(argument)) index += 1;
+      continue;
+    }
+    result.push(argument);
   }
   return result;
 }
@@ -36,10 +52,11 @@ Usage:
   bookmark-atlas collect x [--account NAME] [--full] [--fast] [--keep-export]
   bookmark-atlas capture x [--port N]
   bookmark-atlas search <query> [--limit N]
-  bookmark-atlas recall <task> [--repo PATH] [--limit N] [--semantic]
+  bookmark-atlas recall <task> [--repo PATH] [--limit N] [--semantic] [--stage]
   bookmark-atlas embed [--limit N]
   bookmark-atlas get <resource-id> [--content]
   bookmark-atlas note <resource-id> <text...> [--clear]
+  bookmark-atlas use <resource-id> [--open]
   bookmark-atlas status
   bookmark-atlas mcp
 
@@ -118,21 +135,43 @@ async function main(): Promise<void> {
     }
 
     if (command === "recall") {
-      const task = positional(args.slice(1)).join(" ").trim();
-      if (!task) throw new Error("recall requires a task description");
-      const repoPath = optionValue(args, "--repo");
+      const focus = positional(args.slice(1)).join(" ").trim();
+      const useStage = args.includes("--stage");
+      if (!focus && !useStage) throw new Error("recall requires a task description");
+      const explicitRepo = optionValue(args, "--repo");
+      const repoPath = explicitRepo ?? (useStage ? process.cwd() : undefined);
+      // --stage derives "where the project is now" from git so the caller does
+      // not have to describe the current state by hand.
+      const stage = useStage && repoPath ? collectStage(repoPath, focus) : null;
+      if (!focus && !stage) throw new Error("recall found nothing to work with; pass a task description");
       const limit = Number.parseInt(optionValue(args, "--limit") ?? "5", 10);
       // Semantic ranking is opt-in: measured against this corpus it did not beat
       // keyword ranking. See the README.
       const semantic = args.includes("--semantic") || process.env.BOOKMARK_ATLAS_SEMANTIC === "1";
-      const queryVector = semantic ? embedQuery(db, task) : null;
+      const queryVector = semantic ? embedQuery(db, focus || stage?.description || "") : null;
+      if (stage) process.stderr.write(`stage: branch=${stage.branch ?? "?"} · ${stage.commits.length} commits · ${stage.files.length} files\n`);
       console.log(
         JSON.stringify(
-          recall(db, { task, ...(repoPath ? { repoPath } : {}), limit, queryVector }),
+          recall(db, {
+            task: focus,
+            ...(repoPath ? { repoPath } : {}),
+            ...(stage ? { stage: stage.description } : {}),
+            limit,
+            queryVector,
+          }),
           null,
           2,
         ),
       );
+      return;
+    }
+
+    if (command === "use") {
+      const id = Number.parseInt(args[1] ?? "", 10);
+      if (!Number.isFinite(id) || id < 1) throw new Error("use requires a numeric resource id");
+      const action = args.includes("--open") ? "open" : "insert";
+      recordUsage(db, id, action);
+      console.log(JSON.stringify({ id, action }, null, 2));
       return;
     }
 
@@ -227,7 +266,17 @@ async function main(): Promise<void> {
         ORDER BY i.provider, i.account
       `).all();
       console.log(
-        JSON.stringify({ database: databasePath(), embeddings: embeddingsAvailable(), counts, sync }, null, 2),
+        JSON.stringify(
+          {
+            database: databasePath(),
+            embeddings: embeddingsAvailable(),
+            counts,
+            usage: usageCounts(db),
+            sync,
+          },
+          null,
+          2,
+        ),
       );
       return;
     }

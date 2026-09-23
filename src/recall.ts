@@ -10,11 +10,14 @@ export type RecallOptions = {
   limit?: number;
   /** Precomputed query embedding; omit to skip semantic ranking. */
   queryVector?: number[] | null;
+  /** Where the project is right now (recent work); adds secondary context terms. */
+  stage?: string;
 };
 
 export type RecallHit = SearchResult & {
   whyMatched: string[];
   passage: string | null;
+  useCount: number;
 };
 
 export type ProjectSignals = {
@@ -311,7 +314,7 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     return value;
   };
 
-  const contextTokens = uniqueTokens(tokenize(signals.context))
+  const contextTokens = uniqueTokens(tokenize(`${signals.context} ${options.stage ?? ""}`))
     .filter((token) => !taskTokens.includes(token))
     .sort((a, b) => idf(b) - idf(a))
     .slice(0, MAX_CONTEXT_TOKENS);
@@ -348,7 +351,9 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
   };
   addRanked(rankResourceFts(db, taskMatch, rankedLimit), 1.0);
   addRanked(rankChunkFts(db, taskMatch, rankedLimit), 1.0);
-  addRanked(rankResourceFts(db, `{title description topics} : (${taskMatch})`, rankedLimit), 1.5);
+  if (taskMatch) {
+    addRanked(rankResourceFts(db, `{title description topics} : (${taskMatch})`, rankedLimit), 1.5);
+  }
   if (contextMatch) {
     addRanked(rankResourceFts(db, contextMatch, rankedLimit), 0.3);
     addRanked(rankChunkFts(db, contextMatch, rankedLimit), 0.3);
@@ -391,7 +396,11 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     const vectorScore = vectorMatches.get(id);
     // A strong semantic match is a match on its own, even without keyword overlap.
     if (dependencies.length === 0 && vectorScore === undefined) {
-      if (matchedPrimary.length === 0) {
+      if (taskTokens.length === 0) {
+        // No explicit task: the stage/project context *is* the query, so require
+        // two of its terms rather than a share of a long, noisy description.
+        if (matchedPrimary.length < 2) continue;
+      } else if (matchedPrimary.length === 0) {
         // Only a genuinely vague task may fall back to the project's own terms,
         // and then it must match more than one of them.
         if (taskHasMatches || matchedSecondary.length < 2) continue;
@@ -442,10 +451,12 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
       COALESCE(g.archived, 0) AS archived,
       g.stars AS stars,
       g.pushed_at AS lastPushedAt,
-      n.context AS context
+      n.context AS context,
+      COALESCE(u.use_count, 0) AS useCount
     FROM resources r
     LEFT JOIN github_repositories g ON g.resource_id = r.id
     LEFT JOIN resource_notes n ON n.resource_id = r.id
+    LEFT JOIN bookmark_usage u ON u.resource_id = r.id
     WHERE r.id IN (SELECT value FROM json_each(?))
   `).all(JSON.stringify(scored.map((entry) => entry.id))) as Array<{
     id: number;
@@ -459,6 +470,7 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     stars: number | null;
     lastPushedAt: string | null;
     context: string | null;
+    useCount: number;
   }>;
 
   const byId = new Map(scored.map((entry) => [entry.id, entry]));
@@ -474,6 +486,11 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     }
     if (row.contentStatus === "full") score += 2;
     if (row.archived === 1) score -= 6;
+    // Something you actually used before is a stronger recommendation.
+    if (row.useCount > 0) {
+      score += Math.min(6, row.useCount * 2);
+      reasons.push(`used ${row.useCount}×`);
+    }
     if (row.savedAt) {
       const ageDays = (now - new Date(row.savedAt).getTime()) / 86_400_000;
       score += Math.max(0, 3 - ageDays / 365);
@@ -494,6 +511,7 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
       stars: row.stars,
       lastPushedAt: row.lastPushedAt,
       context: row.context,
+      useCount: row.useCount,
       whyMatched: reasons,
       passage,
       trust: "untrusted_external_content" as const,

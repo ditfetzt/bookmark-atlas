@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase, refreshResourceFts, type AtlasDatabase } from "../src/db.ts";
 import { collectProjectSignals, recall } from "../src/recall.ts";
+import { recordUsage } from "../src/usage.ts";
 
 function seed(db: AtlasDatabase): void {
   db.exec(`
@@ -160,5 +161,47 @@ test("a strong semantic match surfaces without keyword overlap", () => {
   assert.ok(hits.some((hit) => hit.id === 1), "expected the semantically matching resource");
   assert.equal(hits.some((hit) => hit.id === 2), false);
   assert.ok(hits[0]?.whyMatched.some((reason) => reason.startsWith("semantic match")));
+  db.close();
+});
+
+test("recall marks a bookmark that has been used", () => {
+  const db = openDatabase(":memory:");
+  seed(db);
+  recordUsage(db, 1, "insert");
+
+  const hits = recall(db, { task: "redis pipelining", limit: 5 });
+
+  assert.equal(hits[0]?.id, 1);
+  assert.equal(hits[0]?.useCount, 1);
+  assert.ok(hits[0]?.whyMatched.some((reason) => reason.startsWith("used ")));
+  db.close();
+});
+
+test("recall uses the stage as project context for a vague task", () => {
+  const db = openDatabase(":memory:");
+  db.exec(`
+    INSERT INTO integrations (id, provider, account, created_at, updated_at)
+    VALUES (1, 'github', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    INSERT INTO resources (id, canonical_url, resource_type, title, author, description, language, created_at, updated_at)
+    VALUES
+      (1, 'https://github.com/example/vector-search', 'github_repository', 'example/vector-search', 'example',
+       'Vector search and embeddings for local retrieval', 'TypeScript', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+      (2, 'https://github.com/example/bread', 'github_repository', 'example/bread', 'example',
+       'Sourdough baking', 'JavaScript', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    INSERT INTO saves (integration_id, provider_external_id, resource_id, saved_at, created_at, updated_at)
+    VALUES (1, 'R1', 1, '2026-09-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
+           (1, 'R2', 2, '2026-09-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+  `);
+  refreshResourceFts(db, 1);
+  refreshResourceFts(db, 2);
+
+  const hits = recall(db, {
+    task: "we are at this stage now",
+    stage: "vector search embeddings retrieval",
+    limit: 5,
+  });
+
+  assert.ok(hits.some((hit) => hit.id === 1), "expected the stage-relevant repo");
+  assert.equal(hits.some((hit) => hit.id === 2), false);
   db.close();
 });
