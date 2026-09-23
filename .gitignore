@@ -6,5 +6,8 @@ node_modules/
 # Local agent/editor tooling configuration, not part of the project.
 .pi/
 
+# Local Jev rules for this working copy. Personal guardrails, not project source.
+pi-warden.md
+
 # npm pack output
 *.tgz
