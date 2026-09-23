@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
 import type { AtlasDatabase } from "./db.ts";
-import { recall } from "./recall.ts";
+import { recall, relatedResources } from "./recall.ts";
 import { getResource, searchResources, type SearchResult } from "./search.ts";
 
 const MAX_LIMIT = 50;
@@ -126,7 +126,7 @@ const tools = [
   },
   {
     name: "related_bookmarks",
-    description: "Find locally indexed sources related to one Bookmark Atlas source.",
+    description: "Find locally indexed sources related to one Bookmark Atlas source, ranked by shared topics and shared distinctive terms.",
     inputSchema: {
       type: "object",
       properties: { id: { type: "integer", minimum: 1 }, limit: { type: "integer", minimum: 1, maximum: MAX_LIMIT, default: 10 } },
@@ -156,12 +156,12 @@ function callTool(db: AtlasDatabase, name: string, args: Record<string, unknown>
     return { task, repoPath, results: recall(db, { task, repoPath, limit: positiveLimit(args.limit) }) };
   }
   if (name === "related_bookmarks") {
-    const resource = getResource(db, integerId(args.id));
-    if (!resource) throw new Error("resource not found");
-    const query = `${resource.title} ${resource.description ?? ""}`.slice(0, 500);
-    const results = searchResources(db, query, Math.min(positiveLimit(args.limit) + 1, MAX_LIMIT + 1))
-      .filter((item) => item.id !== resource.id).slice(0, MAX_LIMIT);
-    return { resourceId: resource.id, results };
+    const id = integerId(args.id);
+    if (!getResource(db, id)) throw new Error("resource not found");
+    return {
+      resourceId: id,
+      results: relatedResources(db, id, { limit: Math.min(positiveLimit(args.limit), MAX_LIMIT) }),
+    };
   }
   throw new Error(`unknown tool: ${name}`);
 }

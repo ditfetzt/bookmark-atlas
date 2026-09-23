@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase, refreshResourceFts, type AtlasDatabase } from "../src/db.ts";
-import { collectProjectSignals, recall } from "../src/recall.ts";
+import { collectProjectSignals, recall, relatedResources } from "../src/recall.ts";
 import { recordUsage } from "../src/usage.ts";
 
 function seed(db: AtlasDatabase): void {
@@ -36,6 +36,48 @@ function seed(db: AtlasDatabase): void {
   refreshResourceFts(db, 2);
   refreshResourceFts(db, 3);
 }
+
+test("relates saved bookmarks by shared topic and skips unsaved ones", () => {
+  const db = openDatabase(":memory:");
+  seed(db);
+  db.exec(`
+    INSERT INTO resources (id, canonical_url, resource_type, title, author, description, language, created_at, updated_at)
+    VALUES (4, 'https://github.com/example/cache-warmer', 'github_repository', 'example/cache-warmer', 'other',
+            'Warms a Redis cache before traffic arrives', 'TypeScript', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    INSERT INTO saves (integration_id, provider_external_id, resource_id, saved_at, created_at, updated_at)
+    VALUES (1, 'R4', 4, '2026-09-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    INSERT INTO github_repositories (resource_id, github_id, node_id, owner, name, full_name, stars, topics, archived, pushed_at)
+    VALUES (4, 14, 'N4', 'example', 'cache-warmer', 'example/cache-warmer', 20, '["redis","cache"]', 0, '2026-08-01T00:00:00Z');
+  `);
+  refreshResourceFts(db, 4);
+
+  const hits = relatedResources(db, 1, { limit: 5 });
+  // Resource 3 also carries the "redis" topic but is unsaved, and resource 2 shares
+  // nothing, so the shared-topic bookmark is the only relation.
+  assert.deepEqual(hits.map((hit) => hit.id), [4]);
+  assert.ok(hits[0]?.whyRelated.some((reason) => reason.startsWith("topic:")));
+  db.close();
+});
+
+test("does not call two bookmarks related just because both are tagged cli", () => {
+  const db = openDatabase(":memory:");
+  seed(db);
+  db.exec(`
+    INSERT INTO resources (id, canonical_url, resource_type, title, author, description, language, created_at, updated_at)
+    VALUES (5, 'https://github.com/example/cli-tool', 'github_repository', 'example/cli-tool', 'other',
+            'A command line tool', 'TypeScript', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    INSERT INTO saves (integration_id, provider_external_id, resource_id, saved_at, created_at, updated_at)
+    VALUES (1, 'R5', 5, '2026-09-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    INSERT INTO github_repositories (resource_id, github_id, node_id, owner, name, full_name, stars, topics, archived, pushed_at)
+    VALUES (5, 15, 'N5', 'example', 'cli-tool', 'example/cli-tool', 5, '["cli"]', 0, '2026-08-01T00:00:00Z');
+    UPDATE github_repositories SET topics = '["redis","cli"]' WHERE resource_id = 1;
+  `);
+  refreshResourceFts(db, 1);
+  refreshResourceFts(db, 5);
+
+  assert.deepEqual(relatedResources(db, 1, { limit: 5 }), []);
+  db.close();
+});
 
 test("collects dependency and language signals from project manifests", () => {
   const dir = mkdtempSync(join(tmpdir(), "atlas-signals-"));

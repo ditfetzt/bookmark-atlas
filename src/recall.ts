@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { AtlasDatabase } from "./db.ts";
 import { vectorRank } from "./embeddings.ts";
-import { tokenize, type SearchResult } from "./search.ts";
+import { getResource, searchResources, tokenize, type SearchResult } from "./search.ts";
 
 export type RecallOptions = {
   task: string;
@@ -33,6 +33,27 @@ const MAX_CONTEXT_TOKENS = 12;
 const CONTEXT_WEIGHT = 0.35;
 /** Fraction of the task's own IDF weight a result must match. */
 const TASK_COVERAGE_RATIO = 0.35;
+
+/** Same idea for words: "source" is in 392 of 650 resources and separates nothing. */
+const DISTINCTIVE_TERM_RATIO = 0.35;
+
+/**
+ * Topics that describe the *form* of a project rather than its subject. In a
+ * library this size even the commonest topic covers only 17% of repos, so a
+ * frequency floor cannot separate these — two repos can both be "cli" and
+ * "open-source" and have nothing to do with each other. They never count as a
+ * relation on their own.
+ */
+const STRUCTURAL_TOPICS = new Set([
+  "open-source",
+  "awesome",
+  "awesome-list",
+  "cli",
+  "developer-tools",
+  "hacktoberfest",
+  "template",
+  "boilerplate",
+]);
 /** Fraction of the combined (task + context) coverage a result must reach. */
 const MIN_COVERAGE_RATIO = 0.3;
 /** Reciprocal Rank Fusion damping constant. */
@@ -288,6 +309,137 @@ type Scored = {
 };
 
 /**
+ * Inverse document frequency over the resource vocabulary, memoised for the
+ * lifetime of the call. Rarer terms separate bookmarks; common ones do not.
+ */
+function idfLookup(db: AtlasDatabase): (token: string) => number {
+  const total = (db.prepare("SELECT COUNT(*) AS c FROM resources_fts").get() as { c: number }).c || 1;
+  const cache = new Map<string, number>();
+  return (token: string): number => {
+    const cached = cache.get(token);
+    if (cached !== undefined) return cached;
+    const row = db.prepare("SELECT doc FROM resources_vocab WHERE term = ?").get(token) as
+      | { doc: number }
+      | undefined;
+    const value = Math.log((total + 1) / ((row?.doc ?? 0) + 1));
+    cache.set(token, value);
+    return value;
+  };
+}
+
+function parseTopics(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((topic): topic is string => typeof topic === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * How much a shared topic is worth, by how rare it is. Sharing "mlx" says a lot;
+ * sharing "cli" says very little.
+ */
+function topicWeights(db: AtlasDatabase): Map<string, number> {
+  const total = Math.max(
+    1,
+    (db.prepare("SELECT COUNT(*) AS c FROM github_repositories").get() as { c: number }).c,
+  );
+  const rows = db
+    .prepare(`
+      SELECT value AS topic, COUNT(*) AS n
+      FROM github_repositories, json_each(github_repositories.topics)
+      GROUP BY value
+    `)
+    .all() as Array<{ topic: string; n: number }>;
+  return new Map(rows.map((row) => [row.topic.toLowerCase(), Math.log((total + 1) / (row.n + 1))]));
+}
+
+export type RelatedHit = SearchResult & { whyRelated: string[] };
+
+/**
+ * Bookmarks related to one bookmark. This used to re-search the bookmark's own
+ * title, so it returned rows that shared the words already on screen. Instead it
+ * builds a signature from what the bookmark is actually about — its rarest terms
+ * plus its topics — then scores candidates on shared topics first and shared
+ * signature terms second, and says which of the two matched.
+ */
+export function relatedResources(db: AtlasDatabase, id: number, options: { limit?: number } = {}): RelatedHit[] {
+  const limit = Math.min(Math.max(options.limit ?? 10, 1), 25);
+  const source = getResource(db, id);
+  if (!source) return [];
+  const idf = idfLookup(db);
+  const corpusSize = Math.max(
+    1,
+    (db.prepare("SELECT COUNT(*) AS c FROM resources_fts").get() as { c: number }).c,
+  );
+  const termFloor = Math.log((corpusSize + 1) / (DISTINCTIVE_TERM_RATIO * corpusSize + 1));
+
+  const signature = uniqueTokens(
+    tokenize([source.title, source.description ?? "", source.topics.join(" ")].join(" ")),
+  )
+    .map((token) => ({ token, weight: idf(token) }))
+    // Deliberately unfiltered: these terms build the candidate query, and a source's
+    // own topics have to be in it or a bookmark related only by topic is never even
+    // considered. Common words are kept out of the *scoring* instead.
+    .sort((a, b) => b.weight - a.weight || a.token.localeCompare(b.token))
+    .slice(0, 12)
+    .map((entry) => entry.token);
+  if (signature.length === 0) return [];
+
+  const activeIds = new Set(
+    (db.prepare("SELECT resource_id AS id FROM saves WHERE unsaved_at IS NULL").all() as Array<{ id: number }>)
+      .map((row) => row.id),
+  );
+  const candidates = searchResources(db, signature.join(" "), 80).filter(
+    (candidate) => candidate.id !== id && activeIds.has(candidate.id),
+  );
+  if (candidates.length === 0) return [];
+
+  // Every GitHub topic set in one read: cheaper than building an IN list per call.
+  const topicsById = new Map(
+    (
+      db.prepare("SELECT resource_id AS id, topics FROM github_repositories").all() as Array<{
+        id: number;
+        topics: string;
+      }>
+    ).map((row) => [row.id, parseTopics(row.topics)]),
+  );
+  const sourceTopics = new Set(source.topics.map((topic) => topic.toLowerCase()));
+  const signatureSet = new Set(signature);
+  const weights = topicWeights(db);
+
+  return candidates
+    .map((candidate) => {
+      // Topic rarity orders the results rather than gating them: in a library this
+      // size even the commonest topic covers 17% of repos, so a frequency floor
+      // would only ever reject the small ones.
+      const sharedTopics = (topicsById.get(candidate.id) ?? [])
+        .filter((topic) => sourceTopics.has(topic.toLowerCase()))
+        .filter((topic) => !STRUCTURAL_TOPICS.has(topic.toLowerCase()));
+      const sharedTerms = uniqueTokens(tokenize(`${candidate.title} ${candidate.description ?? ""}`))
+        .filter((token) => signatureSet.has(token))
+        // A word carried by a third of the library separates nothing.
+        .filter((token) => idf(token) >= termFloor);
+      const topicScore = sharedTopics.reduce(
+        (sum, topic) => sum + (weights.get(topic.toLowerCase()) ?? 1),
+        0,
+      );
+      return {
+        candidate,
+        whyRelated: [...sharedTopics.map((topic) => `topic:${topic}`), ...sharedTerms].slice(0, 5),
+        score: topicScore * 3 + sharedTerms.length,
+      };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score || a.candidate.title.localeCompare(b.candidate.title))
+    .slice(0, limit)
+    .map((entry) => ({ ...entry.candidate, whyRelated: entry.whyRelated }));
+}
+
+/**
  * Rank saved bookmarks against a task.
  *
  * Keyword matching alone is not enough: a question like "is there a repo that
@@ -301,18 +453,7 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
   const signals = collectProjectSignals(options.repoPath);
   const taskTokens = uniqueTokens(tokenize(options.task));
 
-  const total = (db.prepare("SELECT COUNT(*) AS c FROM resources_fts").get() as { c: number }).c || 1;
-  const idfCache = new Map<string, number>();
-  const idf = (token: string): number => {
-    const cached = idfCache.get(token);
-    if (cached !== undefined) return cached;
-    const row = db.prepare("SELECT doc FROM resources_vocab WHERE term = ?").get(token) as
-      | { doc: number }
-      | undefined;
-    const value = Math.log((total + 1) / ((row?.doc ?? 0) + 1));
-    idfCache.set(token, value);
-    return value;
-  };
+  const idf = idfLookup(db);
 
   const contextTokens = uniqueTokens(tokenize(`${signals.context} ${options.stage ?? ""}`))
     .filter((token) => !taskTokens.includes(token))
