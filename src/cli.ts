@@ -7,7 +7,7 @@ import { buildEmbeddings, embedQuery, embeddingsAvailable } from "./embeddings.t
 import { collectStage } from "./stage.ts";
 import { recordUsage, usageCounts } from "./usage.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
-import { importXJsonFile } from "./x.ts";
+import { importXJsonFile, retitleXArticles } from "./x.ts";
 import { collectXBookmarks } from "./collector.ts";
 import { startXCaptureServer } from "./receiver.ts";
 import { startMcpServer } from "./mcp.ts";
@@ -48,6 +48,7 @@ function printHelp(): void {
 Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
   bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
+  bookmark-atlas enrich x-titles
   bookmark-atlas import x-json <file> [--account NAME] [--reconcile]
   bookmark-atlas collect x [--account NAME] [--full] [--fast] [--keep-export]
   bookmark-atlas capture x [--port N]
@@ -199,6 +200,11 @@ async function main(): Promise<void> {
           2,
         ),
       );
+      return;
+    }
+
+    if (command === "enrich" && args[1] === "x-titles") {
+      console.log(JSON.stringify(retitleXArticles(db), null, 2));
       return;
     }
 

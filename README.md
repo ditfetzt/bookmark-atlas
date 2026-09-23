@@ -25,6 +25,7 @@ Tokens are never written to the database or logs.
 node src/cli.ts sync github                  # incremental star sync
 node src/cli.ts sync github --limit 100      # bounded sync
 node src/cli.ts enrich github-readmes        # fetch + version README content
+node src/cli.ts enrich x-titles              # title article posts from their article
 
 # X bookmarks
 node src/cli.ts import x-json ./bookmarks.json
@@ -47,6 +48,8 @@ node src/cli.ts mcp                          # MCP server over stdio
 ```
 
 `sync github` imports metadata only. Run `enrich github-readmes` to fetch the actual README text; it is incremental and honours ETags, so re-running is cheap. `--limit`/`--concurrency` control the batch.
+
+An X post that is really an article is titled with the article's own title, not with its `t.co` link — the link says nothing about what the bookmark holds. Import derives this every time, and `enrich x-titles` repairs rows written before the rule existed. It reads the stored raw payload, so it needs no network and no re-export; the title column and the search index are both updated.
 
 `get <id> --content` returns the primary captured content, every stored capture kind (post text, full article body, link title/description), and the bookmark's media with absolute file paths and MIME types.
 

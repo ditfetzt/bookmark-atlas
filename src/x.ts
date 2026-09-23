@@ -437,6 +437,10 @@ function ensureIntegration(db: AtlasDatabase, account: string): number {
 }
 
 function title(post: NormalizedPost): string {
+  // An X article post's own text is often just a t.co link, so the article's own
+  // title is what a reader recognises in a list.
+  const articleTitle = (post.article?.title ?? "").replace(/\s+/g, " ").trim();
+  if (articleTitle) return articleTitle.slice(0, 240);
   const oneLine = post.text.replace(/\s+/g, " ").trim();
   const prefix = post.authorHandle ? `@${post.authorHandle}: ` : "X post: ";
   return `${prefix}${oneLine || post.id}`.slice(0, 240);
@@ -642,6 +646,45 @@ export function importXJson(db: AtlasDatabase, input: unknown, options: XImportO
   }
 
   return { format: parsed.format, total: parsed.posts.length, imported, updated, removed, skipped, missingSavedAt };
+}
+
+export type RetitleResult = { scanned: number; retitled: number };
+
+/**
+ * Give stored X article posts the title of their article. Import derives this on
+ * every import, but rows written before that rule keep the bare link, and
+ * re-importing them means a full TweetXVault sync. The title is read back out of
+ * the raw payload already in the database, so this needs no network and no
+ * re-export. Handles both raw shapes: a native tweet (article.article_results)
+ * and a TweetXVault bookmark (article.title).
+ */
+export function retitleXArticles(db: AtlasDatabase): RetitleResult {
+  const rows = db.prepare(`
+    SELECT p.resource_id AS id, p.raw_json AS raw, r.title AS current
+    FROM x_posts p
+    JOIN resources r ON r.id = p.resource_id
+    WHERE EXISTS (SELECT 1 FROM captures c WHERE c.resource_id = p.resource_id AND c.kind = 'x_article')
+  `).all() as Array<{ id: number; raw: string | null; current: string }>;
+  const update = db.prepare("UPDATE resources SET title = ?, updated_at = ? WHERE id = ?");
+  const now = new Date().toISOString();
+  let retitled = 0;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const row of rows) {
+      const raw = jsonObject(row.raw) ?? {};
+      const article = nativeArticle(raw) ?? normalizeArticle(raw.article);
+      const next = (article?.title ?? "").replace(/\s+/g, " ").trim();
+      if (!next || next === row.current) continue;
+      update.run(next.slice(0, 240), now, row.id);
+      refreshResourceFts(db, row.id);
+      retitled += 1;
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { scanned: rows.length, retitled };
 }
 
 export function importXJsonFile(db: AtlasDatabase, file: string, options: XImportOptions = {}): XImportResult {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { openDatabase } from "../src/db.ts";
-import { importXJson } from "../src/x.ts";
+import { importXJson, retitleXArticles } from "../src/x.ts";
 
 const nativeTweet = {
   rest_id: "1234567890",
@@ -219,5 +219,74 @@ test("skips malformed entries without discarding valid bookmarks", () => {
 test("rejects unsupported JSON shapes", () => {
   const db = openDatabase(":memory:");
   assert.throws(() => importXJson(db, { tweets: [] }), /Unsupported X bookmark JSON/);
+  db.close();
+});
+
+test("titles an article post with the article's own title", () => {
+  const db = openDatabase(":memory:");
+  importXJson(
+    db,
+    [
+      {
+        tweet_id: "91",
+        text: "https://t.co/link",
+        author_username: "pipeline",
+        created_at: "2026-08-01T00:00:00Z",
+        added_at: "2026-09-01T00:00:00Z",
+        article: { article_id: "a1", title: "Pipeline deep dive", content_text: "Body text" },
+      },
+    ],
+    { tweetxvaultDir: "/tmp/tv" },
+  );
+  assert.equal(
+    (db.prepare("SELECT title FROM resources").get() as { title: string }).title,
+    "Pipeline deep dive",
+  );
+  db.close();
+});
+
+test("retitles article bookmarks written before the rule existed", () => {
+  const db = openDatabase(":memory:");
+  importXJson(
+    db,
+    [
+      {
+        tweet_id: "92",
+        text: "https://t.co/link",
+        author_username: "pipeline",
+        created_at: "2026-08-01T00:00:00Z",
+        added_at: "2026-09-01T00:00:00Z",
+        article: { article_id: "a2", title: "Pipeline deep dive", content_text: "Body text" },
+        raw_json: JSON.stringify({
+          article: { article_results: { result: { title: "Pipeline deep dive", content: "Body text" } } },
+        }),
+      },
+    ],
+    { tweetxvaultDir: "/tmp/tv" },
+  );
+  // Reproduce what the old rule wrote, then repair it out of the stored payload.
+  db.prepare("UPDATE resources SET title = 'X post: https://t.co/link'").run();
+
+  assert.deepEqual(retitleXArticles(db), { scanned: 1, retitled: 1 });
+  assert.equal(
+    (db.prepare("SELECT title FROM resources").get() as { title: string }).title,
+    "Pipeline deep dive",
+  );
+  // The search index has to follow, or the row keeps ranking under its old title.
+  assert.equal(
+    (db.prepare("SELECT title FROM resources_fts").get() as { title: string }).title,
+    "Pipeline deep dive",
+  );
+  db.close();
+});
+
+test("leaves posts without an article alone", () => {
+  const db = openDatabase(":memory:");
+  importXJson(db, { bookmarks: [nativeTweet] });
+  assert.deepEqual(retitleXArticles(db), { scanned: 0, retitled: 0 });
+  assert.match(
+    (db.prepare("SELECT title FROM resources").get() as { title: string }).title,
+    /local-first agent memory/,
+  );
   db.close();
 });
