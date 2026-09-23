@@ -464,6 +464,8 @@ export class BookmarkPalette implements Component, Focusable {
 
 		const maxStart = Math.max(0, this.filtered.length - LIST_ROWS);
 		const start = Math.max(0, Math.min(this.selected - Math.floor(LIST_ROWS / 2), maxStart));
+		// Numbers are absolute positions in the current view, so they stay stable while scrolling.
+		const ordinalWidth = Math.max(2, String(this.filtered.length).length);
 		for (let offset = 0; offset < LIST_ROWS; offset += 1) {
 			const index = start + offset;
 			const bookmark = this.filtered[index];
@@ -474,6 +476,7 @@ export class BookmarkPalette implements Component, Focusable {
 				continue;
 			}
 			const marker = index === this.selected ? theme.fg("accent", "▸") : " ";
+			const ordinal = String(index + 1).padStart(ordinalWidth);
 			const date = (bookmark.savedAt ?? "").slice(0, 10) || "----------";
 			const author = truncateToWidth((bookmark.author ?? "").replace(/^@/, ""), 14, "…");
 			const badge =
@@ -485,10 +488,10 @@ export class BookmarkPalette implements Component, Focusable {
 					: "";
 			const title = truncateToWidth(
 				bookmark.title.replace(/\s+/g, " "),
-				Math.max(10, innerWidth - 40),
+				Math.max(10, innerWidth - 44 - ordinalWidth),
 				"…",
 			);
-			const text = `${marker} ${date}  ${author.padEnd(14)}  ${title}${badge}`;
+			const text = `${marker} ${ordinal}  ${date}  ${author.padEnd(14)}  ${title}${badge}`;
 			lines.push(
 				row(
 					index === this.selected

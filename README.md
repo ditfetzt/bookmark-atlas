@@ -165,6 +165,8 @@ Media files are never copied. `x_media.local_path` points into TweetXVault's med
 
 Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (relevance → newest → oldest → stars → A–Z), `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `esc` close.
 
+Each row is numbered by its position in the current view, so the number stays stable while you scroll, filter, or sort.
+
 The filter row shows a live count per source plus how many bookmarks you have never used, so you can browse only your starred repositories, only your saved X posts, or only what you have forgotten about.
 
 Inserting or opening a bookmark records usage: it ranks higher in later consults and leaves the `unseen` set.
