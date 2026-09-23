@@ -53,10 +53,22 @@ jobs:
 
       - run: npm ci
 
-      # npm publish runs prepublishOnly, which is typecheck + test, so a
+      # Idempotent: re-tagging a version that is already on the registry is a
+      # no-op rather than a failed run. The first release is published by hand
+      # (trusted publishing needs a package that already exists), so its tag
+      # arrives after the fact.
+      #
+      # npm publish also runs prepublishOnly, which is typecheck + test, so a
       # failing suite cannot reach the registry.
       - name: Publish
-        run: npm publish --provenance --access public
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "$name@$version" version >/dev/null 2>&1; then
+            echo "$name@$version is already on npm; skipping publish"
+            exit 0
+          fi
+          npm publish --provenance --access public
 
       - name: Open the GitHub release
         run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
