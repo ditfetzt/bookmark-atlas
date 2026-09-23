@@ -163,7 +163,7 @@ Media files are never copied. `x_media.local_path` points into TweetXVault's med
 /bookmarks local-first agents
 ```
 
-Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (best match → newest → oldest → stars → A–Z), `ctrl+r` fetch new bookmarks in the background, `ctrl+e` read the full text, `ctrl+n` write a note, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
+Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+a` hide archived repositories, `ctrl+d` show only the last seven days, `ctrl+t` filter by topic, `ctrl+s` cycle sort (best match → newest → oldest → stars → A–Z), `ctrl+r` fetch new bookmarks in the background, `ctrl+e` read the full text, `ctrl+n` write a note, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
 
 Each row is numbered by its position in the current view, so the number stays stable while you scroll, filter, or sort.
 
@@ -175,7 +175,7 @@ Typing searches two things at once. A title, author, or description match that i
 
 Press `?` on an empty search box, or `F1` at any time, for a help screen that explains the extension and lists every key. Any key returns to the list.
 
-The filter row shows a live count per source plus how many bookmarks you have never used, so you can browse only your starred repositories, only your saved X posts, or only what you have forgotten about.
+The filter row shows a live count per source plus how many bookmarks you have never used, so you can browse only your starred repositories, only your saved X posts, or only what you have forgotten about. Alongside it: `ctrl+a` hides archived repositories, `ctrl+d` narrows to the last seven days (handy straight after `ctrl+r`), and `ctrl+t` opens a picker listing every topic by how many bookmarks carry it. Facets stack — source, unseen, archived, recency, topic, and the search query all apply at once.
 
 Inserting or opening a bookmark records usage: it ranks higher in later consults and leaves the `unseen` set.
 

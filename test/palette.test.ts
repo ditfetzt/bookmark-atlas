@@ -20,21 +20,33 @@ type Harness = {
   reading: boolean;
   noteEdit: { id: number; input: { getValue(): string } } | null;
   preview: { id: number; offset: number } | null;
+  topic: string | null;
+  topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null;
   filtered: Array<{ id: number; title: string }>;
   input: { getValue(): string; setValue(value: string): void };
   /** Every action the palette reported through its done callback. */
   actions: unknown[];
 };
 
+type ItemSeed = {
+  title: string;
+  archived?: number;
+  topics?: string[];
+  savedAt?: string;
+  useCount?: number;
+};
+
 /** The palette hides its state; the test only needs the observable cursor and status. */
-function paletteOf(titles: string[], options: Record<string, unknown> = {}): Harness {
-  const items = titles.map((title, index) => ({
+function paletteItems(seeds: ItemSeed[], options: Record<string, unknown> = {}): Harness {
+  const items = seeds.map((seed, index) => ({
     id: index + 1,
-    title,
+    title: seed.title,
     url: `https://example.com/${index + 1}`,
     type: "github_repo",
-    savedAt: "2024-01-01",
-    useCount: 0,
+    savedAt: seed.savedAt ?? "2024-01-01",
+    useCount: seed.useCount ?? 0,
+    archived: seed.archived ?? 0,
+    topics: JSON.stringify(seed.topics ?? []),
   }));
   const actions: unknown[] = [];
   const palette = new BookmarkPalette(
@@ -45,6 +57,13 @@ function paletteOf(titles: string[], options: Record<string, unknown> = {}): Har
   ) as unknown as Harness;
   palette.actions = actions;
   return palette;
+}
+
+function paletteOf(titles: string[], options: Record<string, unknown> = {}): Harness {
+  return paletteItems(
+    titles.map((title) => ({ title })),
+    options,
+  );
 }
 
 function palette(count = 50, options: Record<string, unknown> = {}): Harness {
@@ -62,6 +81,9 @@ function typeQuery(list: Harness, query: string): void {
 const CTRL_R = "\x12";
 const CTRL_E = "\x05";
 const CTRL_N = "\x0e";
+const CTRL_A = "\x01";
+const CTRL_D = "\x04";
+const CTRL_T = "\x14";
 const F1 = "\x1bOP";
 const ESCAPE = "\x1b";
 
@@ -248,6 +270,55 @@ test("a failed note write is reported and the note is rolled back", async () => 
   await new Promise((resolve) => setTimeout(resolve, 0));
   assert.equal(list.notice, "✎ note not saved");
   assert.equal(list.filtered[0]?.title, "Bookmark one");
+});
+
+test("hide archived drops archived repositories", () => {
+  const list = paletteItems([{ title: "live" }, { title: "dead", archived: 1 }]);
+  assert.equal(list.filtered.length, 2);
+  list.handleInput(CTRL_A);
+  assert.deepEqual(list.filtered.map((bookmark) => bookmark.title), ["live"]);
+  list.handleInput(CTRL_A);
+  assert.equal(list.filtered.length, 2);
+});
+
+test("the recent filter keeps only bookmarks inside the window", () => {
+  const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const list = paletteItems([
+    { title: "fresh", savedAt: new Date().toISOString() },
+    { title: "stale", savedAt: old },
+  ]);
+  list.handleInput(CTRL_D);
+  assert.deepEqual(list.filtered.map((bookmark) => bookmark.title), ["fresh"]);
+});
+
+test("the topic picker ranks topics and filters by the chosen one", () => {
+  const list = paletteItems([
+    { title: "one", topics: ["llm", "rag"] },
+    { title: "two", topics: ["llm"] },
+    { title: "three", topics: ["design"] },
+  ]);
+  list.handleInput(CTRL_T);
+  // "All topics" is always first, so clearing the filter is one keystroke away.
+  assert.equal(list.topicPicker?.entries[0]?.name, "");
+  assert.deepEqual(
+    list.topicPicker?.entries.slice(1).map((entry) => [entry.name, entry.count]),
+    [["llm", 2], ["design", 1], ["rag", 1]],
+  );
+  list.handleInput("\x1b[B"); // down, onto llm
+  list.handleInput("\r");
+  assert.equal(list.topic, "llm");
+  assert.deepEqual(list.filtered.map((bookmark) => bookmark.title), ["one", "two"]);
+});
+
+test("abandoning the topic picker leaves the filter alone", () => {
+  const list = paletteItems([{ title: "one", topics: ["llm"] }]);
+  list.handleInput(CTRL_T);
+  list.handleInput("\x1b[B");
+  list.handleInput(ESCAPE);
+  assert.equal(list.topicPicker, null);
+  assert.equal(list.topic, null);
+  assert.equal(list.filtered.length, 1);
+  assert.deepEqual(list.actions, []);
 });
 
 test("f1 opens help and any key returns to the list", () => {

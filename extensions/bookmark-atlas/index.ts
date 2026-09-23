@@ -12,6 +12,7 @@
  *   ctrl+r   fetch new bookmarks (GitHub stars, X posts, READMEs)
  *   ctrl+e   read the full text
  *   ctrl+n   write a note about the selected bookmark
+ *   ctrl+t   filter by topic; ctrl+a hide archived; ctrl+d only the last 7 days
  *   esc      close
  *
  * Reads the Bookmark Atlas SQLite database directly (read-only). Override the
@@ -55,6 +56,9 @@ const DB_PATH = process.env.BOOKMARK_ATLAS_DB ?? join(REPO_ROOT, "data", "bookma
 const CLI_PATH = join(REPO_ROOT, "src", "cli.ts");
 // Rows visible in the list; also the jump size for PageUp/PageDown and Cmd+↑/↓.
 const LIST_ROWS = 10;
+// How far back "recent" reaches, and how many topics the picker will list.
+const RECENT_DAYS = 7;
+const TOPIC_LIMIT = 60;
 const EXCERPT_ROWS = 5;
 const IMAGE_ROWS = 10;
 // The reading pane trades the list, its separator and the image for more text, so
@@ -79,6 +83,8 @@ const LIST_SQL = `
     (SELECT COUNT(*) FROM x_media m WHERE m.resource_id = r.id AND m.type = 'video') AS videos,
     n.context AS context,
     g.stars AS stars,
+    COALESCE(g.archived, 0) AS archived,
+    g.topics AS topics,
     COALESCE(u.use_count, 0) AS useCount
   FROM resources r
   LEFT JOIN resource_notes n ON n.resource_id = r.id
@@ -98,6 +104,8 @@ type Bookmark = {
 	videos: number;
 	context: string | null;
 	stars: number | null;
+	archived: number;
+	topics: string | null;
 	useCount: number;
 };
 
@@ -106,6 +114,19 @@ type SourceFilter = "all" | "github" | "x";
 
 function sourceOf(bookmark: Bookmark): "github" | "x" {
 	return bookmark.type === "x_post" ? "x" : "github";
+}
+
+/** Topics are stored as a JSON array; never let a malformed value break the list. */
+function topicsOf(bookmark: Bookmark): string[] {
+	if (!bookmark.topics) return [];
+	try {
+		const parsed = JSON.parse(bookmark.topics) as unknown;
+		return Array.isArray(parsed)
+			? parsed.filter((value): value is string => typeof value === "string")
+			: [];
+	} catch {
+		return [];
+	}
 }
 
 type SortMode = "relevance" | "newest" | "oldest" | "stars" | "alpha";
@@ -311,6 +332,10 @@ export class BookmarkPalette implements Component, Focusable {
 	private sourceFilter: SourceFilter = "all";
 	private sortMode: SortMode = "relevance";
 	private unseenOnly = false;
+	private hideArchived = false;
+	private recentOnly = false;
+	private topic: string | null = null;
+	private topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null = null;
 	private reading = false;
 	private noteEdit: { id: number; input: Input } | null = null;
 	private preview: { id: number; offset: number } | null = null;
@@ -355,6 +380,15 @@ export class BookmarkPalette implements Component, Focusable {
 				? this.items
 				: this.items.filter((bookmark) => sourceOf(bookmark) === this.sourceFilter);
 		if (this.unseenOnly) scoped = scoped.filter((bookmark) => bookmark.useCount === 0);
+		if (this.hideArchived) scoped = scoped.filter((bookmark) => bookmark.archived !== 1);
+		if (this.recentOnly) {
+			const cutoff = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString();
+			scoped = scoped.filter((bookmark) => (bookmark.savedAt ?? "") >= cutoff);
+		}
+		if (this.topic) {
+			const wanted = this.topic;
+			scoped = scoped.filter((bookmark) => topicsOf(bookmark).includes(wanted));
+		}
 		const trimmed = query.trim();
 		if (!trimmed) return this.sortBookmarks([...scoped]);
 		// fuzzyMatch accepts any in-order subsequence, which matches nearly anything
@@ -407,6 +441,11 @@ export class BookmarkPalette implements Component, Focusable {
 			default:
 				return sorted;
 		}
+	}
+
+	private refilter(): void {
+		this.filtered = this.applyFilter(this.input.getValue());
+		this.selected = 0;
 	}
 
 	private cycleSort(): void {
@@ -507,6 +546,57 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 	}
 
+	/** Topics worth offering, most used first, with an "All topics" entry on top. */
+	private openTopicPicker(): void {
+		const counts = new Map<string, number>();
+		let total = 0;
+		for (const bookmark of this.items) {
+			if (this.sourceFilter !== "all" && sourceOf(bookmark) !== this.sourceFilter) continue;
+			total += 1;
+			for (const name of topicsOf(bookmark)) counts.set(name, (counts.get(name) ?? 0) + 1);
+		}
+		const entries = [
+			{ name: "", count: total },
+			...[...counts.entries()]
+				.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+				.slice(0, TOPIC_LIMIT)
+				.map(([name, count]) => ({ name, count })),
+		];
+		const current = entries.findIndex((entry) => entry.name === (this.topic ?? ""));
+		this.topicPicker = { entries, index: current >= 0 ? current : 0 };
+		this.requestRender?.();
+	}
+
+	private handleTopicPickerInput(data: string): void {
+		const picker = this.topicPicker;
+		if (!picker) return;
+		const page = LIST_ROWS - 1;
+		const last = Math.max(0, picker.entries.length - 1);
+		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+t") || matchesKey(data, "ctrl+c")) {
+			this.topicPicker = null;
+		} else if (matchesKey(data, "up")) {
+			picker.index = Math.max(0, picker.index - 1);
+		} else if (matchesKey(data, "down")) {
+			picker.index = Math.min(last, picker.index + 1);
+		} else if (matchesKey(data, "pageUp")) {
+			picker.index = Math.max(0, picker.index - page);
+		} else if (matchesKey(data, "pageDown")) {
+			picker.index = Math.min(last, picker.index + page);
+		} else if (matchesKey(data, "home")) {
+			picker.index = 0;
+		} else if (matchesKey(data, "end")) {
+			picker.index = last;
+		} else if (matchesKey(data, "return")) {
+			const name = picker.entries[picker.index]?.name ?? "";
+			this.topic = name === "" ? null : name;
+			this.topicPicker = null;
+			this.refilter();
+		} else {
+			return;
+		}
+		this.requestRender?.();
+	}
+
 	/** Keys while writing a note: enter saves it, esc cancels, anything else edits. */
 	private handleNoteInput(data: string): void {
 		const edit = this.noteEdit;
@@ -580,6 +670,10 @@ export class BookmarkPalette implements Component, Focusable {
 			this.requestRender?.();
 			return;
 		}
+		if (this.topicPicker) {
+			this.handleTopicPickerInput(data);
+			return;
+		}
 		if (this.reading) {
 			this.handleReadingInput(data);
 			return;
@@ -628,6 +722,20 @@ export class BookmarkPalette implements Component, Focusable {
 				this.noteEdit = { id: bookmark.id, input };
 				this.requestRender?.();
 			}
+			return;
+		}
+		if (matchesKey(data, "ctrl+a")) {
+			this.hideArchived = !this.hideArchived;
+			this.refilter();
+			return;
+		}
+		if (matchesKey(data, "ctrl+d")) {
+			this.recentOnly = !this.recentOnly;
+			this.refilter();
+			return;
+		}
+		if (matchesKey(data, "ctrl+t")) {
+			this.openTopicPicker();
 			return;
 		}
 		// Jump navigation. macOS sends Fn+←/→ as home/end and Fn+↑/↓ as pageUp/pageDown;
@@ -688,6 +796,51 @@ export class BookmarkPalette implements Component, Focusable {
 		this.selected = 0;
 	}
 
+	/** The topic picker: topics ranked by how many bookmarks carry them. */
+	private renderTopics(width: number): string[] {
+		const theme = this.theme;
+		const innerWidth = Math.max(20, width - 4);
+		const pad = (text: string): string => {
+			const line = truncateToWidth(text, innerWidth, "…", true);
+			return line + " ".repeat(Math.max(0, innerWidth - visibleWidth(line)));
+		};
+		const row = (content: string): string =>
+			theme.fg("border", "│ ") + pad(content) + theme.fg("border", " │");
+		const picker = this.topicPicker;
+		const entries = picker?.entries ?? [];
+		const selected = picker?.index ?? 0;
+		const rows = 20;
+		const maxStart = Math.max(0, entries.length - rows);
+		const start = Math.max(0, Math.min(selected - Math.floor(rows / 2), maxStart));
+
+		const lines: string[] = [theme.fg("border", `┌${"─".repeat(width - 2)}┐`)];
+		lines.push(
+			row(
+				theme.fg("accent", theme.bold("Filter by topic")) +
+					theme.fg("dim", `  ${Math.max(0, entries.length - 1)} topics`),
+			),
+		);
+		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
+		for (let offset = 0; offset < rows; offset += 1) {
+			const index = start + offset;
+			const entry = entries[index];
+			if (!entry) {
+				lines.push(row(""));
+				continue;
+			}
+			const label = (entry.name === "" ? "All topics" : `#${entry.name}`).padEnd(30);
+			const text = `${index === selected ? "▸" : " "} ${label}${String(entry.count).padStart(4)}`;
+			lines.push(
+				row(
+					index === selected ? theme.bg("selectedBg", theme.fg("text", text)) : theme.fg("muted", text),
+				),
+			);
+		}
+		lines.push(theme.fg("border", `└${"─".repeat(width - 2)}┘`));
+		lines.push(theme.fg("dim", "  ↑↓ navigate · enter filter · esc cancel"));
+		return lines;
+	}
+
 	/** The `?` / F1 screen: what this is, and every key. */
 	private renderHelp(width: number): string[] {
 		const theme = this.theme;
@@ -716,6 +869,9 @@ export class BookmarkPalette implements Component, Focusable {
 			theme.fg("accent", "Filter"),
 			key("tab / shift+tab", "All → GitHub → X"),
 			key("ctrl+u", "only bookmarks you have never opened"),
+			key("ctrl+a", "hide archived repositories"),
+			key("ctrl+d", "only what was added in the last 7 days"),
+			key("ctrl+t", "filter by topic"),
 			key("ctrl+s", "sort: relevance, newest, oldest, stars, A-Z"),
 			"",
 			theme.fg("accent", "Act"),
@@ -739,6 +895,7 @@ export class BookmarkPalette implements Component, Focusable {
 
 	render(width: number): string[] {
 		if (this.showHelp) return this.renderHelp(width);
+		if (this.topicPicker) return this.renderTopics(width);
 		this.input.focused = this.focused;
 		if (this.noteEdit) this.noteEdit.input.focused = this.focused;
 		const theme = this.theme;
@@ -791,8 +948,11 @@ export class BookmarkPalette implements Component, Focusable {
 					chip("GitHub", "github", counts.github) +
 					chip("X", "x", counts.x) +
 					toggle(`unseen ${unseenCount}`, this.unseenOnly) +
+					toggle("hide archived", this.hideArchived) +
+					toggle(`recent ${RECENT_DAYS}d`, this.recentOnly) +
+					(this.topic ? toggle(`#${this.topic}`, true) : "") +
 					theme.fg("dim", ` sort:${sortLabel} `) +
-					theme.fg("dim", this.notice ?? "tab/ctrl+u/ctrl+s/ctrl+r · ? help"),
+					theme.fg("dim", this.notice ?? "? help"),
 			),
 		);
 		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
