@@ -25,6 +25,20 @@ test("finds indexed repository metadata without network or LLM", () => {
   db.close();
 });
 
+test("stems word variants so designing matches design", () => {
+  const db = openDatabase(":memory:");
+  seed(db);
+  db.prepare("UPDATE resources_fts SET title = ? WHERE resource_id = 1").run("designing systems");
+
+  for (const query of ["design", "designs", "designing"]) {
+    assert.ok(
+      searchResources(db, query, 5).some((hit) => hit.id === 1),
+      `expected "${query}" to find the resource titled "designing systems"`,
+    );
+  }
+  db.close();
+});
+
 test("returns a note as context and indexes it for search", () => {
   const db = openDatabase(":memory:");
   seed(db);

@@ -200,7 +200,7 @@ function migrate(db: AtlasDatabase): void {
       topics,
       language,
       content,
-      tokenize = 'unicode61 remove_diacritics 2'
+      tokenize = 'porter unicode61 remove_diacritics 2'
     );
   `);
 
@@ -224,26 +224,69 @@ function migrate(db: AtlasDatabase): void {
         topics,
         language,
         content,
-        tokenize = 'unicode61 remove_diacritics 2'
+        tokenize = 'porter unicode61 remove_diacritics 2'
       )
     `);
     rebuildMissingFtsRows(db);
   }
 
-  // Term document-frequency table for IDF weighting in recall.
-  db.exec("CREATE VIRTUAL TABLE IF NOT EXISTS resources_vocab USING fts5vocab(resources_fts, 'row')");
+  // Porter stemming, so "designing" finds "design" and "designs". FTS5 records the
+  // tokenizer in the table's own SQL, so an older one is detected without needing a
+  // schema version. The vocabulary table is built from resources_fts, so it has to
+  // be dropped with it and recreated below.
+  const ftsSql =
+    (
+      db
+        .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'resources_fts'")
+        .get() as { sql: string } | undefined
+    )?.sql ?? "";
+  if (!ftsSql.includes("porter")) {
+    db.exec("DROP TABLE IF EXISTS resources_vocab");
+    db.exec("DROP TABLE resources_fts");
+    db.exec(`
+      CREATE VIRTUAL TABLE resources_fts USING fts5(
+        resource_id UNINDEXED,
+        title,
+        description,
+        topics,
+        language,
+        content,
+        tokenize = 'porter unicode61 remove_diacritics 2'
+      )
+    `);
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      for (const row of db.prepare("SELECT id FROM resources").all() as Array<{ id: number }>) {
+        refreshResourceFts(db, row.id);
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  // IDF counts through the index itself now, so the vocabulary table is dropped
+  // rather than maintained.
+  db.exec("DROP TABLE IF EXISTS resources_vocab");
 
   // Chunk-level index (external content over `chunks`). Triggers keep it in
   // sync; the rebuild runs only the first time the table is created.
-  const chunksFtsExists = db
-    .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chunks_fts'")
-    .get();
+  const chunksFtsSql = (
+    db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'chunks_fts'")
+      .get() as { sql: string } | undefined
+  )?.sql;
+  const chunksNeedsRebuild = chunksFtsSql === undefined || !chunksFtsSql.includes("porter");
+  if (chunksFtsSql !== undefined && !chunksFtsSql.includes("porter")) {
+    db.exec("DROP TABLE chunks_fts");
+  }
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
       text,
       content = 'chunks',
       content_rowid = 'id',
-      tokenize = 'unicode61 remove_diacritics 2'
+      tokenize = 'porter unicode61 remove_diacritics 2'
     );
 
     CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON chunks BEGIN
@@ -259,7 +302,7 @@ function migrate(db: AtlasDatabase): void {
       INSERT INTO chunks_fts (rowid, text) VALUES (new.id, new.text);
     END;
   `);
-  if (!chunksFtsExists) {
+  if (chunksNeedsRebuild) {
     db.exec("INSERT INTO chunks_fts (chunks_fts) VALUES ('rebuild')");
   }
 }

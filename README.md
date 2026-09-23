@@ -94,6 +94,7 @@ All tools are read-only. Returned bookmark and README text is always marked `unt
 `recall` ranks saved bookmarks against a task, biased by the current project. It reads `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, and `Cargo.toml` for dependency and language signals, then scores candidates on:
 
 - **term rarity (IDF)** — common words like "repo" or "work" carry almost no weight, so results must match rare terms to count
+- **stemming** — both indexes are Porter-stemmed, so "designing", "designs" and "design" are the same term
 - **coverage** — a result must match a real share of the task's weighted terms, not just one
 - **dependency matches** against repository names (generic names and `@types/*` are ignored)
 - **metadata matches** (title, description, topics) ranked above content matches

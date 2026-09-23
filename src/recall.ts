@@ -318,10 +318,13 @@ function idfLookup(db: AtlasDatabase): (token: string) => number {
   return (token: string): number => {
     const cached = cache.get(token);
     if (cached !== undefined) return cached;
-    const row = db.prepare("SELECT doc FROM resources_vocab WHERE term = ?").get(token) as
-      | { doc: number }
-      | undefined;
-    const value = Math.log((total + 1) / ((row?.doc ?? 0) + 1));
+    // Counted through the index rather than a vocabulary table: the tokenizer stems
+    // the query exactly as it stemmed the documents, so a raw token like "example"
+    // cannot drift away from its stored stem "exampl" and read as infinitely rare.
+    const row = db
+      .prepare("SELECT COUNT(*) AS n FROM resources_fts WHERE resources_fts MATCH ?")
+      .get(`"${token.replaceAll('"', '""')}"`) as { n: number };
+    const value = Math.log((total + 1) / (row.n + 1));
     cache.set(token, value);
     return value;
   };
