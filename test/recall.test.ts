@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDatabase, refreshResourceFts, type AtlasDatabase } from "../src/db.ts";
 import { collectProjectSignals, recall, relatedResources } from "../src/recall.ts";
-import { recordUsage } from "../src/usage.ts";
 
 function seed(db: AtlasDatabase): void {
   db.exec(`
@@ -203,19 +202,6 @@ test("a strong semantic match surfaces without keyword overlap", () => {
   assert.ok(hits.some((hit) => hit.id === 1), "expected the semantically matching resource");
   assert.equal(hits.some((hit) => hit.id === 2), false);
   assert.ok(hits[0]?.whyMatched.some((reason) => reason.startsWith("semantic match")));
-  db.close();
-});
-
-test("recall marks a bookmark that has been used", () => {
-  const db = openDatabase(":memory:");
-  seed(db);
-  recordUsage(db, 1, "insert");
-
-  const hits = recall(db, { task: "redis pipelining", limit: 5 });
-
-  assert.equal(hits[0]?.id, 1);
-  assert.equal(hits[0]?.useCount, 1);
-  assert.ok(hits[0]?.whyMatched.some((reason) => reason.startsWith("used ")));
   db.close();
 });
 

@@ -34,7 +34,6 @@ type ItemSeed = {
   archived?: number;
   topics?: string[];
   savedAt?: string;
-  useCount?: number;
   stars?: number;
 };
 
@@ -46,7 +45,6 @@ function paletteItems(seeds: ItemSeed[], options: Record<string, unknown> = {}):
     url: `https://example.com/${index + 1}`,
     type: "github_repo",
     savedAt: seed.savedAt ?? "2024-01-01",
-    useCount: seed.useCount ?? 0,
     archived: seed.archived ?? 0,
     stars: seed.stars ?? null,
     topics: JSON.stringify(seed.topics ?? []),

@@ -85,12 +85,10 @@ const LIST_SQL = `
     n.context AS context,
     g.stars AS stars,
     COALESCE(g.archived, 0) AS archived,
-    g.topics AS topics,
-    COALESCE(u.use_count, 0) AS useCount
+    g.topics AS topics
   FROM resources r
   LEFT JOIN resource_notes n ON n.resource_id = r.id
   LEFT JOIN github_repositories g ON g.resource_id = r.id
-  LEFT JOIN bookmark_usage u ON u.resource_id = r.id
 `;
 
 type Bookmark = {
@@ -108,7 +106,6 @@ type Bookmark = {
 	stars: number | null;
 	archived: number;
 	topics: string | null;
-	useCount: number;
 };
 
 /** Which source a bookmark came from. */
@@ -158,25 +155,6 @@ type PaletteOptions = {
 	/** Test seam: how one refresh step is executed. Defaults to the real CLI. */
 	cliRunner?: CliRunner;
 };
-
-/** Record that a bookmark was used. Best effort: never break the palette. */
-function recordUse(resourceId: number, action: "insert" | "open"): void {
-	try {
-		const db = new DatabaseSync(DB_PATH);
-		const now = new Date().toISOString();
-		db.prepare(
-			`INSERT INTO bookmark_usage (resource_id, first_used_at, last_used_at, use_count, last_action)
-       VALUES (?, ?, ?, 1, ?)
-       ON CONFLICT(resource_id) DO UPDATE SET
-         last_used_at = excluded.last_used_at,
-         use_count = bookmark_usage.use_count + 1,
-         last_action = excluded.last_action`,
-		).run(resourceId, now, now, action);
-		db.close();
-	} catch {
-		// usage tracking is best effort
-	}
-}
 
 type Media = { type: string; path: string | null; contentType: string | null };
 
@@ -353,7 +331,6 @@ export class BookmarkPalette implements Component, Focusable {
 	private selected = 0;
 	private sourceFilter: SourceFilter = "all";
 	private sortMode: SortMode = "relevance";
-	private unseenOnly = false;
 	private hideArchived = false;
 	private recentOnly = false;
 	private topic: string | null = null;
@@ -401,7 +378,6 @@ export class BookmarkPalette implements Component, Focusable {
 			this.sourceFilter === "all"
 				? this.items
 				: this.items.filter((bookmark) => sourceOf(bookmark) === this.sourceFilter);
-		if (this.unseenOnly) scoped = scoped.filter((bookmark) => bookmark.useCount === 0);
 		if (this.hideArchived) scoped = scoped.filter((bookmark) => bookmark.archived !== 1);
 		if (this.recentOnly) {
 			const cutoff = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString();
@@ -708,7 +684,6 @@ export class BookmarkPalette implements Component, Focusable {
 		if (matchesKey(data, "home")) return scrollTo(0);
 		if (matchesKey(data, "end")) return scrollTo(maxOffset);
 		if (matchesKey(data, "return") && bookmark) {
-			recordUse(bookmark.id, "insert");
 			this.done({ action: "insert", id: bookmark.id });
 		}
 	}
@@ -741,12 +716,6 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		if (matchesKey(data, "shift+tab")) {
 			this.cycleSource(-1);
-			return;
-		}
-		if (matchesKey(data, "ctrl+u")) {
-			this.unseenOnly = !this.unseenOnly;
-			this.filtered = this.applyFilter(this.input.getValue());
-			this.selected = 0;
 			return;
 		}
 		if (matchesKey(data, "ctrl+s")) {
@@ -815,10 +784,7 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		if (matchesKey(data, "return")) {
 			const bookmark = this.selectedBookmark();
-			if (bookmark) {
-				recordUse(bookmark.id, "insert");
-				this.done({ action: "insert", id: bookmark.id });
-			}
+			if (bookmark) this.done({ action: "insert", id: bookmark.id });
 			return;
 		}
 		const bookmark = this.selectedBookmark();
@@ -827,7 +793,6 @@ export class BookmarkPalette implements Component, Focusable {
 			return;
 		}
 		if (bookmark && matchesKey(data, "ctrl+o")) {
-			recordUse(bookmark.id, "open");
 			if (process.platform === "darwin") spawnSync("open", [bookmark.url]);
 			this.done({ action: "cancel" });
 			return;
@@ -917,7 +882,6 @@ export class BookmarkPalette implements Component, Focusable {
 			"",
 			theme.fg("accent", "Filter"),
 			key("tab / shift+tab", "All → GitHub → X"),
-			key("ctrl+u", "only bookmarks you have never opened"),
 			key("ctrl+a", "hide archived repositories"),
 			key("ctrl+d", "only what was added in the last 7 days"),
 			key("ctrl+t", "filter by topic"),
@@ -977,7 +941,6 @@ export class BookmarkPalette implements Component, Focusable {
 			),
 		);
 		const counts = this.sourceCounts();
-		const unseenCount = this.items.filter((bookmark) => bookmark.useCount === 0).length;
 		// Without a query (or a consult ranking) there is nothing to be relevant to.
 		const sortLabel =
 			this.sortMode === "relevance" && !this.hasQuery() && !this.ranked ? "newest" : this.sortMode;
@@ -994,7 +957,6 @@ export class BookmarkPalette implements Component, Focusable {
 				chip("All", "all", counts.all) +
 					chip("GitHub", "github", counts.github) +
 					chip("X", "x", counts.x) +
-					toggle(`unseen ${unseenCount}`, this.unseenOnly) +
 					toggle("hide archived", this.hideArchived) +
 					toggle(`recent ${RECENT_DAYS}d`, this.recentOnly) +
 					(this.topic ? toggle(`#${this.topic}`, true) : "") +

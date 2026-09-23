@@ -173,14 +173,6 @@ function migrate(db: AtlasDatabase): void {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS bookmark_usage (
-      resource_id INTEGER PRIMARY KEY REFERENCES resources(id) ON DELETE CASCADE,
-      first_used_at TEXT NOT NULL,
-      last_used_at TEXT NOT NULL,
-      use_count INTEGER NOT NULL DEFAULT 0,
-      last_action TEXT
-    );
-
     CREATE TABLE IF NOT EXISTS chunk_embeddings (
       chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
       dim INTEGER NOT NULL,
@@ -266,9 +258,10 @@ function migrate(db: AtlasDatabase): void {
     }
   }
 
-  // IDF counts through the index itself now, so the vocabulary table is dropped
-  // rather than maintained.
+  // Both of these are gone: IDF counts through the index itself, and usage
+  // statistics are no longer tracked at all.
   db.exec("DROP TABLE IF EXISTS resources_vocab");
+  db.exec("DROP TABLE IF EXISTS bookmark_usage");
 
   // Chunk-level index (external content over `chunks`). Triggers keep it in
   // sync; the rebuild runs only the first time the table is created.

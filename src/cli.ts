@@ -5,7 +5,6 @@ import { getResource, searchResources } from "./search.ts";
 import { recall } from "./recall.ts";
 import { buildEmbeddings, embedQuery, embeddingsAvailable } from "./embeddings.ts";
 import { collectStage } from "./stage.ts";
-import { recordUsage, usageCounts } from "./usage.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile, repairXPosts } from "./x.ts";
 import { collectXBookmarks } from "./collector.ts";
@@ -168,15 +167,6 @@ async function main(): Promise<void> {
       return;
     }
 
-    if (command === "use") {
-      const id = Number.parseInt(args[1] ?? "", 10);
-      if (!Number.isFinite(id) || id < 1) throw new Error("use requires a numeric resource id");
-      const action = args.includes("--open") ? "open" : "insert";
-      recordUsage(db, id, action);
-      console.log(JSON.stringify({ id, action }, null, 2));
-      return;
-    }
-
     if (command === "embed") {
       const rawLimit = optionValue(args, "--limit");
       const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
@@ -283,7 +273,6 @@ async function main(): Promise<void> {
             database: databasePath(),
             embeddings: embeddingsAvailable(),
             counts,
-            usage: usageCounts(db),
             sync,
           },
           null,

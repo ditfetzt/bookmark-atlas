@@ -17,7 +17,6 @@ export type RecallOptions = {
 export type RecallHit = SearchResult & {
   whyMatched: string[];
   passage: string | null;
-  useCount: number;
 };
 
 export type ProjectSignals = {
@@ -595,12 +594,10 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
       COALESCE(g.archived, 0) AS archived,
       g.stars AS stars,
       g.pushed_at AS lastPushedAt,
-      n.context AS context,
-      COALESCE(u.use_count, 0) AS useCount
+      n.context AS context
     FROM resources r
     LEFT JOIN github_repositories g ON g.resource_id = r.id
     LEFT JOIN resource_notes n ON n.resource_id = r.id
-    LEFT JOIN bookmark_usage u ON u.resource_id = r.id
     WHERE r.id IN (SELECT value FROM json_each(?))
   `).all(JSON.stringify(scored.map((entry) => entry.id))) as Array<{
     id: number;
@@ -614,7 +611,6 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     stars: number | null;
     lastPushedAt: string | null;
     context: string | null;
-    useCount: number;
   }>;
 
   const byId = new Map(scored.map((entry) => [entry.id, entry]));
@@ -630,11 +626,6 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     }
     if (row.contentStatus === "full") score += 2;
     if (row.archived === 1) score -= 6;
-    // Something you actually used before is a stronger recommendation.
-    if (row.useCount > 0) {
-      score += Math.min(6, row.useCount * 2);
-      reasons.push(`used ${row.useCount}×`);
-    }
     if (row.savedAt) {
       const ageDays = (now - new Date(row.savedAt).getTime()) / 86_400_000;
       score += Math.max(0, 3 - ageDays / 365);
@@ -655,7 +646,6 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
       stars: row.stars,
       lastPushedAt: row.lastPushedAt,
       context: row.context,
-      useCount: row.useCount,
       whyMatched: reasons,
       passage,
       trust: "untrusted_external_content" as const,
