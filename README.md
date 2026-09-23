@@ -172,7 +172,7 @@ Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last 
 
 Each row is numbered by its position in the current view, so the number stays stable while you scroll, filter, or sort.
 
-Typing searches two things at once. A title, author, or description match that is contiguous or word-aligned ranks first; then bookmarks found only inside their captured README, post, or article text, ordered by keyword relevance.
+Typing searches two things at once. A bookmark whose title, author, description, or URL literally contains what you typed ranks first, with title matches ahead of the rest; then bookmarks found only inside their captured README, post, or article text, ordered by keyword relevance; then looser letter-by-letter matches, which is what makes partial typing work.
 
 `ctrl+s` cycles the sort: `newest`, `oldest`, `stars`, `A–Z`. Sorting by stars swaps the date column for the star count (`★ 390.3k`, `★ 12.3k`). A bookmark with no star count — every X post — reads `★ —` and sorts below all of them, because there is no star count to rank it by. `best match` joins the cycle once you have typed a query; without one there is nothing to be relevant to, so the base order is simply newest-first and is labelled `newest`.
 

@@ -211,6 +211,18 @@ test("a query with no real metadata match keeps every candidate", () => {
   assert.equal(list.filtered.length, 1);
 });
 
+test("a query literally in a title leads even when looser matches abound", () => {
+  // The fuzzy scorer scans greedily from the left, so on a long title it credits
+  // scattered letters and can rank the real match fifth. A literal hit wins.
+  const list = paletteItems([
+    { title: "GargantuaX/gemini-watermark-remover" },
+    { title: "mail-in-a-box/mailinabox" },
+    { title: "How I write motion graphics prompts for MiniMax H3 Max" },
+  ]);
+  typeQuery(list, "minimax");
+  assert.equal(list.filtered[0]?.title, "How I write motion graphics prompts for MiniMax H3 Max");
+});
+
 test("ctrl+e opens the reading pane and esc returns without closing", () => {
   const list = paletteOf(["Bookmark one"]);
   list.handleInput(CTRL_E);

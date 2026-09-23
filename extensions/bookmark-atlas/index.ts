@@ -413,29 +413,46 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		const trimmed = query.trim();
 		if (!trimmed) return this.sortBookmarks([...scoped]);
-		// fuzzyMatch accepts any in-order subsequence, which matches nearly anything
-		// in a long title+url. A negative score means the match is contiguous or
-		// word-aligned; only those may outrank a match found in the content.
-		const tokens = trimmed.split(/[\s/]+/).filter(Boolean);
-		const strong: Array<{ bookmark: Bookmark; score: number }> = [];
-		const weak: Array<{ bookmark: Bookmark; score: number }> = [];
+		// fuzzyMatch accepts any in-order subsequence and scans greedily from the left,
+		// so it credits scattered letters over a clean run later in the string. Only a
+		// literal substring hit may outrank a match found in the captured content; a
+		// loose subsequence hit still appears, but beneath it.
+		const tokens = trimmed.toLowerCase().split(/[\s/]+/).filter(Boolean);
+		const literal: Array<{ bookmark: Bookmark; inTitle: boolean; at: number }> = [];
+		const loose: Array<{ bookmark: Bookmark; score: number }> = [];
 		for (const bookmark of scoped) {
-			const text = `${bookmark.title} ${bookmark.author ?? ""} ${bookmark.description ?? ""} ${bookmark.url}`;
+			const raw = `${bookmark.title} ${bookmark.author ?? ""} ${bookmark.description ?? ""} ${bookmark.url}`;
+			const title = bookmark.title.toLowerCase();
+			const text = raw.toLowerCase();
+			let at = Number.MAX_SAFE_INTEGER;
+			let everyToken = true;
+			for (const token of tokens) {
+				const found = text.indexOf(token);
+				if (found < 0) {
+					everyToken = false;
+					break;
+				}
+				if (found < at) at = found;
+			}
+			if (everyToken) {
+				literal.push({ bookmark, inTitle: tokens.every((token) => title.includes(token)), at });
+				continue;
+			}
 			let score = 0;
 			let matchesAll = true;
 			for (const token of tokens) {
-				const match = fuzzyMatch(token, text);
+				const match = fuzzyMatch(token, raw);
 				if (!match.matches) {
 					matchesAll = false;
 					break;
 				}
 				score += match.score;
 			}
-			if (matchesAll) (score < 0 ? strong : weak).push({ bookmark, score });
+			if (matchesAll) loose.push({ bookmark, score });
 		}
-		strong.sort((a, b) => a.score - b.score);
-		weak.sort((a, b) => a.score - b.score);
-		const matched = new Set([...strong, ...weak].map((entry) => entry.bookmark.id));
+		literal.sort((a, b) => Number(b.inTitle) - Number(a.inTitle) || a.at - b.at);
+		loose.sort((a, b) => a.score - b.score);
+		const matched = new Set([...literal, ...loose].map((entry) => entry.bookmark.id));
 		const scopedById = new Map(scoped.map((bookmark) => [bookmark.id, bookmark]));
 		const byContent: Bookmark[] = [];
 		for (const id of contentMatchIds(trimmed)) {
@@ -443,9 +460,9 @@ export class BookmarkPalette implements Component, Focusable {
 			if (bookmark && !matched.has(id)) byContent.push(bookmark);
 		}
 		return this.sortBookmarks([
-			...strong.map((entry) => entry.bookmark),
+			...literal.map((entry) => entry.bookmark),
 			...byContent,
-			...weak.map((entry) => entry.bookmark),
+			...loose.map((entry) => entry.bookmark),
 		]);
 	}
 
