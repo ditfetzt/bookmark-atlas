@@ -415,13 +415,20 @@ export function relatedResources(db: AtlasDatabase, id: number, options: { limit
 
   return candidates
     .map((candidate) => {
+      const candidateTopics = topicsById.get(candidate.id) ?? [];
       // Topic rarity orders the results rather than gating them: in a library this
       // size even the commonest topic covers 17% of repos, so a frequency floor
       // would only ever reject the small ones.
-      const sharedTopics = (topicsById.get(candidate.id) ?? [])
+      const sharedTopics = candidateTopics
         .filter((topic) => sourceTopics.has(topic.toLowerCase()))
         .filter((topic) => !STRUCTURAL_TOPICS.has(topic.toLowerCase()));
-      const sharedTerms = uniqueTokens(tokenize(`${candidate.title} ${candidate.description ?? ""}`))
+      // A candidate's own topics count as terms too. Without that, a bookmark whose
+      // only link to the source is a topic tag can never match one that declares no
+      // topics of its own — which is why tmux/tmux, which has none, did not relate
+      // to herdr, which is tagged "tmux".
+      const sharedTerms = uniqueTokens(
+        tokenize(`${candidate.title} ${candidate.description ?? ""} ${candidateTopics.join(" ")}`),
+      )
         .filter((token) => signatureSet.has(token))
         // A word carried by a third of the library separates nothing.
         .filter((token) => idf(token) >= termFloor);

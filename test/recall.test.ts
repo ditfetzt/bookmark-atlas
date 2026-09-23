@@ -36,6 +36,55 @@ function seed(db: AtlasDatabase): void {
   refreshResourceFts(db, 3);
 }
 
+test("relates a bookmark tagged with the source's name when the source has no topics", () => {
+  const db = openDatabase(":memory:");
+  seed(db);
+  // Resource 1 keeps "redis" in its title but declares no topics at all — the shape
+  // tmux/tmux has. Resource 6 carries "redis" only as a topic, so the topic tag is
+  // the sole link between them.
+  db.exec(`
+    UPDATE github_repositories SET topics = '[]' WHERE resource_id = 1;
+    INSERT INTO resources (id, canonical_url, resource_type, title, author, description, language, created_at, updated_at)
+    VALUES (6, 'https://github.com/example/workspace-x', 'github_repository', 'example/workspace-x', 'other',
+            'a workspace for terminals', 'Rust', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    INSERT INTO saves (integration_id, provider_external_id, resource_id, saved_at, created_at, updated_at)
+    VALUES (1, 'R6', 6, '2026-09-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    INSERT INTO github_repositories (resource_id, github_id, node_id, owner, name, full_name, stars, topics, archived, pushed_at)
+    VALUES (6, 16, 'N6', 'example', 'workspace-x', 'example/workspace-x', 5, '["redis"]', 0, '2026-08-01T00:00:00Z');
+  `);
+  refreshResourceFts(db, 1);
+  refreshResourceFts(db, 6);
+
+  // Filler, so "redis" is a rare term rather than half the corpus. The term floor
+  // is relative to the library size, exactly as it is in the real one.
+  const insertResource = db.prepare(`
+    INSERT INTO resources (id, canonical_url, resource_type, title, author, description, language, created_at, updated_at)
+    VALUES (?, ?, 'github_repository', ?, 'filler', 'an unrelated project', 'Go', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+  `);
+  const insertSave = db.prepare(`
+    INSERT INTO saves (integration_id, provider_external_id, resource_id, saved_at, created_at, updated_at)
+    VALUES (1, ?, ?, '2026-09-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+  `);
+  const insertRepo = db.prepare(`
+    INSERT INTO github_repositories (resource_id, github_id, node_id, owner, name, full_name, stars, topics, archived, pushed_at)
+    VALUES (?, ?, ?, 'filler', ?, ?, 1, '["filler"]', 0, '2026-08-01T00:00:00Z')
+  `);
+  for (let index = 0; index < 20; index += 1) {
+    const id = 100 + index;
+    insertResource.run(id, `https://github.com/filler/project-${index}`, `filler/project-${index}`);
+    insertSave.run(`F${index}`, id);
+    insertRepo.run(id, 1000 + index, `NF${index}`, `project-${index}`, `filler/project-${index}`);
+    refreshResourceFts(db, id);
+  }
+
+  const hits = relatedResources(db, 1, { limit: 5 });
+  assert.ok(
+    hits.some((hit) => hit.id === 6),
+    "a bookmark tagged with the source's own name should count as related",
+  );
+  db.close();
+});
+
 test("relates saved bookmarks by shared topic and skips unsaved ones", () => {
   const db = openDatabase(":memory:");
   seed(db);
