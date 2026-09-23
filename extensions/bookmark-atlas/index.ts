@@ -988,13 +988,17 @@ export class BookmarkPalette implements Component, Focusable {
 			const date = savedOn(bookmark).slice(0, 10) || "----------";
 			const leading = showStars ? formatStars(bookmark.stars).padEnd(10) : date;
 			const author = truncateToWidth((bookmark.author ?? "").replace(/^@/, ""), 14, "…");
+			// A note is the strongest signal recall has, so it is marked and coloured to
+			// stand out from the media badges.
+			const media = [
+				bookmark.photos ? `📷${bookmark.photos}` : "",
+				bookmark.videos ? `🎬${bookmark.videos}` : "",
+			]
+				.filter(Boolean)
+				.join(" ");
 			const badge =
-				bookmark.photos || bookmark.videos
-					? theme.fg(
-							"dim",
-							`  ${bookmark.photos ? `📷${bookmark.photos}` : ""}${bookmark.videos ? ` 🎬${bookmark.videos}` : ""}`,
-						)
-					: "";
+				(media ? theme.fg("dim", `  ${media}`) : "") +
+				(bookmark.context ? theme.fg("accent", " 📝") : "");
 			const title = truncateToWidth(
 				bookmark.title.replace(/\s+/g, " "),
 				Math.max(10, innerWidth - 44 - ordinalWidth),
