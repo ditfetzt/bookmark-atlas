@@ -16,6 +16,8 @@ type Harness = {
   refresh(): Promise<void>;
   selected: number;
   refreshStatus: string | null;
+  showHelp: boolean;
+  input: { getValue(): string; setValue(value: string): void };
 };
 
 /** The palette hides its state; the test only needs the observable cursor and status. */
@@ -32,6 +34,7 @@ function palette(count = 50, options: Record<string, unknown> = {}): Harness {
 }
 
 const CTRL_R = "\x12";
+const F1 = "\x1bOP";
 
 /** A stand-in for the CLI that records each call and returns a chosen payload. */
 function fakeRunner(handler: (args: string[]) => { ok: boolean; stdout: string }): {
@@ -119,4 +122,29 @@ test("a step reporting no change reads as such", async () => {
   const list = palette(50, { refreshRunner: run });
   await list.refresh();
   assert.equal(list.refreshStatus, "✓ GitHub no change · X no change · READMEs no change");
+});
+
+test("? opens help only while the search box is empty", () => {
+  const list = palette(50);
+  list.handleInput("?");
+  assert.equal(list.showHelp, true);
+
+  list.handleInput("x"); // any key returns to the list, and is not typed
+  assert.equal(list.showHelp, false);
+  assert.equal(list.input.getValue(), "");
+
+  list.handleInput("o");
+  list.handleInput("a");
+  list.handleInput("?");
+  assert.equal(list.showHelp, false);
+  assert.equal(list.input.getValue(), "oa?");
+});
+
+test("f1 opens help and any key returns to the list", () => {
+  const list = palette(50);
+  list.handleInput(F1);
+  assert.equal(list.showHelp, true);
+  list.handleInput(PAGE_DOWN);
+  assert.equal(list.showHelp, false);
+  assert.equal(list.selected, 0);
 });

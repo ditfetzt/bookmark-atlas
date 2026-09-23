@@ -264,6 +264,7 @@ export class BookmarkPalette implements Component, Focusable {
 	private readonly requestRender: (() => void) | undefined;
 	private readonly refreshRunner: CliRunner;
 	private refreshing = false;
+	private showHelp = false;
 	private refreshStatus: string | null = null;
 	private readonly details = new Map<number, BookmarkDetail | null>();
 	private readonly images = new Map<number, Image | null>();
@@ -421,6 +422,11 @@ export class BookmarkPalette implements Component, Focusable {
 	}
 
 	handleInput(data: string): void {
+		if (this.showHelp) {
+			this.showHelp = false;
+			this.requestRender?.();
+			return;
+		}
 		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
 			this.done({ action: "cancel" });
 			return;
@@ -493,12 +499,67 @@ export class BookmarkPalette implements Component, Focusable {
 			return;
 		}
 
+		// `?` only opens help on an empty search box, so it can still be typed in a query.
+		if (matchesKey(data, "f1") || (data === "?" && this.input.getValue().trim() === "")) {
+			this.showHelp = true;
+			this.requestRender?.();
+			return;
+		}
+
 		this.input.handleInput(data);
 		this.filtered = this.applyFilter(this.input.getValue());
 		this.selected = 0;
 	}
 
+	/** The `?` / F1 screen: what this is, and every key. */
+	private renderHelp(width: number): string[] {
+		const theme = this.theme;
+		const innerWidth = Math.max(20, width - 4);
+		const pad = (text: string): string => {
+			const line = truncateToWidth(text, innerWidth, "…", true);
+			return line + " ".repeat(Math.max(0, innerWidth - visibleWidth(line)));
+		};
+		const row = (content: string): string =>
+			theme.fg("border", "│ ") + pad(content) + theme.fg("border", " │");
+		const key = (keys: string, what: string): string =>
+			theme.fg("accent", `  ${keys.padEnd(18)}`) + theme.fg("muted", what);
+
+		const body = [
+			theme.fg("accent", theme.bold("Bookmark Atlas")),
+			theme.fg("dim", "  Starred GitHub repos and saved X posts, read from a local database."),
+			"",
+			theme.fg("dim", "  Type to filter, arrow keys to move, enter to insert."),
+			"",
+			theme.fg("accent", "Navigate"),
+			key("↑ / ↓", "one row"),
+			key("Fn+↑ / Fn+↓", "ten rows (Page Up/Down)"),
+			key("Fn+← / Fn+→", "first / last (Home/End)"),
+			key("Cmd+↑ / Cmd+↓", "ten rows, where the terminal forwards Cmd"),
+			"",
+			theme.fg("accent", "Filter"),
+			key("tab / shift+tab", "All → GitHub → X"),
+			key("ctrl+u", "only bookmarks you have never opened"),
+			key("ctrl+s", "sort: relevance, newest, oldest, stars, A-Z"),
+			"",
+			theme.fg("accent", "Act"),
+			key("enter", "insert title, url and content into the editor"),
+			key("ctrl+y", "copy the url"),
+			key("ctrl+o", "open in the browser"),
+			key("ctrl+r", "fetch new bookmarks (GitHub, X, READMEs)"),
+			"",
+			key("? / f1", "this help"),
+			key("esc", "close"),
+		];
+
+		const lines: string[] = [theme.fg("border", `┌${"─".repeat(width - 2)}┐`)];
+		for (const line of body) lines.push(row(line));
+		lines.push(theme.fg("border", `└${"─".repeat(width - 2)}┘`));
+		lines.push(theme.fg("dim", "  press any key to go back"));
+		return lines;
+	}
+
 	render(width: number): string[] {
+		if (this.showHelp) return this.renderHelp(width);
 		this.input.focused = this.focused;
 		const theme = this.theme;
 		const innerWidth = Math.max(20, width - 4);
@@ -544,7 +605,7 @@ export class BookmarkPalette implements Component, Focusable {
 					chip("X", "x", counts.x) +
 					toggle(`unseen ${unseenCount}`, this.unseenOnly) +
 					theme.fg("dim", ` sort:${this.sortMode} `) +
-					theme.fg("dim", this.refreshStatus ?? "tab/ctrl+u/ctrl+s/ctrl+r · ⇞⇟/home-end"),
+					theme.fg("dim", this.refreshStatus ?? "tab/ctrl+u/ctrl+s/ctrl+r · ? help"),
 			),
 		);
 		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
