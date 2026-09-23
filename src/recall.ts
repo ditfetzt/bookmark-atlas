@@ -33,8 +33,14 @@ const CONTEXT_WEIGHT = 0.35;
 /** Fraction of the task's own IDF weight a result must match. */
 const TASK_COVERAGE_RATIO = 0.35;
 
-/** Same idea for words: "source" is in 392 of 650 resources and separates nothing. */
-const DISTINCTIVE_TERM_RATIO = 0.35;
+/**
+ * A shared word only counts if it is rarer than this share of the library. A third
+ * was too tight: "design", "claude" and "skills" sit at 37-45% here, so they were
+ * discarded and a bookmark whose only real words were those had no signature at
+ * all. Half the library is background — "source" is 63% and "code" 73% — and
+ * anything above that separates nothing.
+ */
+const DISTINCTIVE_TERM_RATIO = 0.5;
 
 /**
  * Topics that describe the *form* of a project rather than its subject. In a
@@ -308,13 +314,16 @@ type Scored = {
 };
 
 /**
- * Inverse document frequency over the resource vocabulary, memoised for the
- * lifetime of the call. Rarer terms separate bookmarks; common ones do not.
+ * Document frequency and IDF over the resource index, memoised for the lifetime
+ * of the call. Rarer terms separate bookmarks; common ones do not.
  */
-function idfLookup(db: AtlasDatabase): (token: string) => number {
+function corpusLookup(db: AtlasDatabase): {
+  df: (token: string) => number;
+  idf: (token: string) => number;
+} {
   const total = (db.prepare("SELECT COUNT(*) AS c FROM resources_fts").get() as { c: number }).c || 1;
   const cache = new Map<string, number>();
-  return (token: string): number => {
+  const df = (token: string): number => {
     const cached = cache.get(token);
     if (cached !== undefined) return cached;
     // Counted through the index rather than a vocabulary table: the tokenizer stems
@@ -323,21 +332,19 @@ function idfLookup(db: AtlasDatabase): (token: string) => number {
     const row = db
       .prepare("SELECT COUNT(*) AS n FROM resources_fts WHERE resources_fts MATCH ?")
       .get(`"${token.replaceAll('"', '""')}"`) as { n: number };
-    const value = Math.log((total + 1) / (row.n + 1));
-    cache.set(token, value);
-    return value;
+    cache.set(token, row.n);
+    return row.n;
   };
+  return { df, idf: (token: string): number => Math.log((total + 1) / (df(token) + 1)) };
 }
 
-function parseTopics(value: string): string[] {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((topic): topic is string => typeof topic === "string")
-      : [];
-  } catch {
-    return [];
-  }
+/**
+ * Post text carries t.co and media URLs whose path fragments look like extremely
+ * rare words. Left in, they crowd the signature — one post's whole signature was
+ * shortlink codes — so URLs are dropped before anything is tokenised.
+ */
+function stripUrls(text: string): string {
+  return text.replace(/https?:\/\/\S+/gi, " ");
 }
 
 /**
@@ -359,6 +366,22 @@ function topicWeights(db: AtlasDatabase): Map<string, number> {
   return new Map(rows.map((row) => [row.topic.toLowerCase(), Math.log((total + 1) / (row.n + 1))]));
 }
 
+function parseTopics(value: string): string[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed)
+      ? parsed.filter((topic): topic is string => typeof topic === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Topics describing the subject, with the form-describing ones removed. */
+function subjectTopics(topics: string[]): string[] {
+  return topics.filter((topic) => !STRUCTURAL_TOPICS.has(topic.toLowerCase()));
+}
+
 export type RelatedHit = SearchResult & { whyRelated: string[] };
 
 /**
@@ -372,20 +395,33 @@ export function relatedResources(db: AtlasDatabase, id: number, options: { limit
   const limit = Math.min(Math.max(options.limit ?? 10, 1), 25);
   const source = getResource(db, id);
   if (!source) return [];
-  const idf = idfLookup(db);
+  const { df, idf } = corpusLookup(db);
   const corpusSize = Math.max(
     1,
     (db.prepare("SELECT COUNT(*) AS c FROM resources_fts").get() as { c: number }).c,
   );
   const termFloor = Math.log((corpusSize + 1) / (DISTINCTIVE_TERM_RATIO * corpusSize + 1));
 
-  const signature = uniqueTokens(
-    tokenize([source.title, source.description ?? "", source.topics.join(" ")].join(" ")),
-  )
-    .map((token) => ({ token, weight: idf(token) }))
-    // Deliberately unfiltered: these terms build the candidate query, and a source's
-    // own topics have to be in it or a bookmark related only by topic is never even
-    // considered. Common words are kept out of the *scoring* instead.
+  const tokens = uniqueTokens(
+    tokenize(
+      stripUrls(
+        [source.title, source.description ?? "", subjectTopics(source.topics).join(" ")].join(" "),
+      ),
+    ),
+  );
+  const scored: Array<{ token: string; weight: number }> = [];
+  for (const token of tokens) {
+    // A word that appears in this bookmark and nowhere else cannot connect it to
+    // anything — and those one-offs are exactly what tops a rarity ranking, which is
+    // how a post listing seventeen library names got a signature made of nothing but
+    // those names while "shadcn" sat just outside it.
+    if (df(token) < 2) continue;
+    const rarity = idf(token);
+    // Ubiquitous words are dropped: "source" is in 63% of the library.
+    if (rarity < termFloor) continue;
+    scored.push({ token, weight: rarity });
+  }
+  const signature = scored
     .sort((a, b) => b.weight - a.weight || a.token.localeCompare(b.token))
     .slice(0, 12)
     .map((entry) => entry.token);
@@ -425,9 +461,14 @@ export function relatedResources(db: AtlasDatabase, id: number, options: { limit
       // A candidate's own topics count as terms too. Without that, a bookmark whose
       // only link to the source is a topic tag can never match one that declares no
       // topics of its own — which is why tmux/tmux, which has none, did not relate
-      // to herdr, which is tagged "tmux".
+      // to herdr, which is tagged "tmux". Form-describing tags are left out here as
+      // well, or "cli" would sneak back in as a term after being dropped as a topic.
       const sharedTerms = uniqueTokens(
-        tokenize(`${candidate.title} ${candidate.description ?? ""} ${candidateTopics.join(" ")}`),
+        tokenize(
+          stripUrls(
+            `${candidate.title} ${candidate.description ?? ""} ${subjectTopics(candidateTopics).join(" ")}`,
+          ),
+        ),
       )
         .filter((token) => signatureSet.has(token))
         // A word carried by a third of the library separates nothing.
@@ -462,7 +503,7 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
   const signals = collectProjectSignals(options.repoPath);
   const taskTokens = uniqueTokens(tokenize(options.task));
 
-  const idf = idfLookup(db);
+  const { idf } = corpusLookup(db);
 
   const contextTokens = uniqueTokens(tokenize(`${signals.context} ${options.stage ?? ""}`))
     .filter((token) => !taskTokens.includes(token))
