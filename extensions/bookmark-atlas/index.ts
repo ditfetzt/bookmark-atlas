@@ -8,6 +8,7 @@
  *   enter    insert the bookmark (title, url, content) into the editor
  *   ctrl+y   copy the url
  *   ctrl+o   open the url in the default browser
+ *   ctrl+r   fetch new bookmarks (GitHub stars, X posts, READMEs)
  *   esc      close
  *
  * Reads the Bookmark Atlas SQLite database directly (read-only). Override the
@@ -26,7 +27,7 @@ import {
 	type Component,
 	type Focusable,
 } from "@earendil-works/pi-tui";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -106,6 +107,10 @@ type PaletteOptions = {
 	/** Preset relevance order (from /consult); restricts the list to these ids. */
 	rankedIds?: number[];
 	reasons?: Map<number, string[]>;
+	/** Repaint hook, so async work (a background refresh) can update the overlay. */
+	requestRender?: () => void;
+	/** Test seam: how one refresh step is executed. Defaults to the real CLI. */
+	refreshRunner?: CliRunner;
 };
 
 /** Record that a bookmark was used. Best effort: never break the palette. */
@@ -194,6 +199,37 @@ async function copyText(text: string): Promise<boolean> {
 	return spawnSync("pbcopy", [], { input: text }).status === 0;
 }
 
+type CliResult = { ok: boolean; stdout: string; stderr: string };
+type CliRunner = (args: string[]) => Promise<CliResult>;
+
+/** Run the CLI without blocking the TUI. Resolves on exit rather than throwing. */
+function runCli(args: string[]): Promise<CliResult> {
+	return new Promise((resolve) => {
+		let stdout = "";
+		let stderr = "";
+		const child = spawn(process.execPath, [CLI_PATH, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+		child.stdout.on("data", (chunk: Buffer) => {
+			stdout += chunk.toString("utf8");
+		});
+		child.stderr.on("data", (chunk: Buffer) => {
+			stderr += chunk.toString("utf8");
+		});
+		child.on("error", (error) => resolve({ ok: false, stdout, stderr: `${stderr}${error.message}` }));
+		child.on("close", (code) => resolve({ ok: code === 0, stdout, stderr }));
+	});
+}
+
+/** Pull one named count out of a CLI JSON payload, when it printed one. */
+function countFrom(stdout: string, key: string): number | null {
+	try {
+		const value = JSON.parse(stdout) as Record<string, unknown>;
+		const count = value[key];
+		return typeof count === "number" ? count : null;
+	} catch {
+		return null;
+	}
+}
+
 function wrap(text: string, width: number, maxLines: number): string[] {
 	const words = text.replace(/\s+/g, " ").trim().split(" ");
 	const lines: string[] = [];
@@ -215,7 +251,7 @@ function wrap(text: string, width: number, maxLines: number): string[] {
 export class BookmarkPalette implements Component, Focusable {
 	focused = false;
 	private readonly input: Input;
-	private readonly items: Bookmark[];
+	private items: Bookmark[];
 	private readonly theme: Theme;
 	private readonly done: (action: Action) => void;
 	private readonly reasons: Map<number, string[]>;
@@ -225,6 +261,10 @@ export class BookmarkPalette implements Component, Focusable {
 	private sourceFilter: SourceFilter = "all";
 	private sortMode: SortMode = "relevance";
 	private unseenOnly = false;
+	private readonly requestRender: (() => void) | undefined;
+	private readonly refreshRunner: CliRunner;
+	private refreshing = false;
+	private refreshStatus: string | null = null;
 	private readonly details = new Map<number, BookmarkDetail | null>();
 	private readonly images = new Map<number, Image | null>();
 
@@ -243,6 +283,8 @@ export class BookmarkPalette implements Component, Focusable {
 			: allItems;
 		this.ranked = Boolean(options.rankedIds);
 		this.reasons = options.reasons ?? new Map();
+		this.requestRender = options.requestRender;
+		this.refreshRunner = options.refreshRunner ?? runCli;
 		this.theme = theme;
 		this.done = done;
 		this.input = new Input({ placeholder: "Search title, author, description, url…" });
@@ -337,6 +379,47 @@ export class BookmarkPalette implements Component, Focusable {
 		return image;
 	}
 
+	/** Run the refresh steps in order, non-blocking, then reload the list in place. */
+	async refresh(): Promise<void> {
+		if (this.refreshing) return;
+		if (!existsSync(CLI_PATH)) {
+			this.refreshStatus = "refresh unavailable: CLI not found";
+			this.requestRender?.();
+			return;
+		}
+		const steps = [
+			{ label: "GitHub", args: ["sync", "github"], key: "imported" },
+			{ label: "X", args: ["collect", "x", "--fast"], key: "imported" },
+			{ label: "READMEs", args: ["enrich", "github-readmes", "--limit", "25"], key: "enriched" },
+		];
+		this.refreshing = true;
+		const parts: string[] = [];
+		let failed = false;
+		try {
+			for (const step of steps) {
+				this.refreshStatus = `↻ refreshing ${step.label}\u2026`;
+				this.requestRender?.();
+				const result = await this.refreshRunner(step.args);
+				if (!result.ok) {
+					failed = true;
+					parts.push(`${step.label} failed`);
+					continue;
+				}
+				const count = countFrom(result.stdout, step.key);
+				parts.push(`${step.label} ${count === null ? "done" : count > 0 ? `+${count}` : "no change"}`);
+			}
+		} finally {
+			this.refreshing = false;
+			this.items = loadBookmarks();
+			this.details.clear();
+			this.images.clear();
+			this.filtered = this.applyFilter(this.input.getValue());
+			this.selected = Math.min(this.selected, Math.max(0, this.filtered.length - 1));
+			this.refreshStatus = `${failed ? "⚠" : "✓"} ${parts.join(" · ")}`;
+			this.requestRender?.();
+		}
+	}
+
 	handleInput(data: string): void {
 		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
 			this.done({ action: "cancel" });
@@ -358,6 +441,10 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		if (matchesKey(data, "ctrl+s")) {
 			this.cycleSort();
+			return;
+		}
+		if (matchesKey(data, "ctrl+r")) {
+			void this.refresh();
 			return;
 		}
 		// Jump navigation. macOS sends Fn+←/→ as home/end and Fn+↑/↓ as pageUp/pageDown;
@@ -457,7 +544,7 @@ export class BookmarkPalette implements Component, Focusable {
 					chip("X", "x", counts.x) +
 					toggle(`unseen ${unseenCount}`, this.unseenOnly) +
 					theme.fg("dim", ` sort:${this.sortMode} `) +
-					theme.fg("dim", "tab/ctrl+u/ctrl+s · ⇞⇟/home-end"),
+					theme.fg("dim", this.refreshStatus ?? "tab/ctrl+u/ctrl+s/ctrl+r · ⇞⇟/home-end"),
 			),
 		);
 		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
@@ -567,8 +654,11 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 			const result = await ctx.ui.custom<Action>(
-				(_tui, theme, _keybindings, done) =>
-					new BookmarkPalette(items, theme, done, { initialQuery: args.trim() }),
+				(tui, theme, _keybindings, done) =>
+					new BookmarkPalette(items, theme, done, {
+						initialQuery: args.trim(),
+						requestRender: () => tui.requestRender(),
+					}),
 				{ overlay: true, overlayOptions: { anchor: "center", width: "85%", maxHeight: "90%" } },
 			);
 			if (result.action !== "insert") return;
@@ -624,8 +714,12 @@ export default function (pi: ExtensionAPI) {
 			const rankedIds = hits.map((hit) => hit.id);
 			const reasons = new Map(hits.map((hit) => [hit.id, hit.whyMatched]));
 			const chosen = await ctx.ui.custom<Action>(
-				(_tui, theme, _keybindings, done) =>
-					new BookmarkPalette(loadBookmarks(), theme, done, { rankedIds, reasons }),
+				(tui, theme, _keybindings, done) =>
+					new BookmarkPalette(loadBookmarks(), theme, done, {
+						rankedIds,
+						reasons,
+						requestRender: () => tui.requestRender(),
+					}),
 				{ overlay: true, overlayOptions: { anchor: "center", width: "85%", maxHeight: "90%" } },
 			);
 			if (chosen.action !== "insert") return;

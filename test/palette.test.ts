@@ -11,8 +11,15 @@ const PAGE_DOWN = "\x1b[6~";
 const CMD_UP = "\x1b[1;9A";
 const CMD_DOWN = "\x1b[1;9B";
 
-/** The palette hides `selected`; the test only needs the observable cursor. */
-function palette(count = 50): { handleInput(data: string): void; selected: number } {
+type Harness = {
+  handleInput(data: string): void;
+  refresh(): Promise<void>;
+  selected: number;
+  refreshStatus: string | null;
+};
+
+/** The palette hides its state; the test only needs the observable cursor and status. */
+function palette(count = 50, options: Record<string, unknown> = {}): Harness {
   const items = Array.from({ length: count }, (_, index) => ({
     id: index + 1,
     title: `Bookmark ${index + 1}`,
@@ -21,9 +28,23 @@ function palette(count = 50): { handleInput(data: string): void; selected: numbe
     savedAt: "2024-01-01",
     useCount: 0,
   }));
-  return new BookmarkPalette(items as never, {} as never, () => {}) as unknown as {
-    handleInput(data: string): void;
-    selected: number;
+  return new BookmarkPalette(items as never, {} as never, () => {}, options as never) as unknown as Harness;
+}
+
+const CTRL_R = "\x12";
+
+/** A stand-in for the CLI that records each call and returns a chosen payload. */
+function fakeRunner(handler: (args: string[]) => { ok: boolean; stdout: string }): {
+  calls: string[];
+  run: (args: string[]) => Promise<{ ok: boolean; stdout: string; stderr: string }>;
+} {
+  const calls: string[] = [];
+  return {
+    calls,
+    run: async (args: string[]) => {
+      calls.push(args.join(" "));
+      return { stderr: "", ...handler(args) };
+    },
   };
 }
 
@@ -63,4 +84,39 @@ test("Cmd+arrow pages when the terminal forwards the super modifier", () => {
   assert.equal(list.selected, 10);
   list.handleInput(CMD_UP);
   assert.equal(list.selected, 0);
+});
+
+test("refresh runs every source in order and reports what changed", async () => {
+  const { calls, run } = fakeRunner((args) => ({
+    ok: true,
+    stdout: JSON.stringify(args[0] === "enrich" ? { enriched: 25 } : { imported: 3 }),
+  }));
+  const list = palette(50, { refreshRunner: run });
+  await list.refresh();
+  assert.deepEqual(calls, ["sync github", "collect x --fast", "enrich github-readmes --limit 25"]);
+  assert.equal(list.refreshStatus, "✓ GitHub +3 · X +3 · READMEs +25");
+});
+
+test("ctrl+r starts a refresh without waiting for it", () => {
+  const { run } = fakeRunner(() => ({ ok: true, stdout: "{}" }));
+  const list = palette(50, { refreshRunner: run });
+  list.handleInput(CTRL_R);
+  assert.match(list.refreshStatus ?? "", /refreshing GitHub/);
+});
+
+test("a failed step is reported and does not stop the rest", async () => {
+  const { calls, run } = fakeRunner((args) =>
+    args[0] === "collect" ? { ok: false, stdout: "" } : { ok: true, stdout: JSON.stringify({ imported: 1, enriched: 1 }) },
+  );
+  const list = palette(9, { refreshRunner: run });
+  await list.refresh();
+  assert.deepEqual(calls.map((call) => call.split(" ")[0]), ["sync", "collect", "enrich"]);
+  assert.equal(list.refreshStatus, "⚠ GitHub +1 · X failed · READMEs +1");
+});
+
+test("a step reporting no change reads as such", async () => {
+  const { run } = fakeRunner(() => ({ ok: true, stdout: JSON.stringify({ imported: 0, enriched: 0 }) }));
+  const list = palette(50, { refreshRunner: run });
+  await list.refresh();
+  assert.equal(list.refreshStatus, "✓ GitHub no change · X no change · READMEs no change");
 });
