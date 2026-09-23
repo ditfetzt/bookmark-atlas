@@ -44,6 +44,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - First public release: GitHub star sync, X bookmark import, full-text search,
   task-aware recall, the `/bookmarks` pi palette, and the read-only MCP server.
 - `assets/palette.svg`, an animated illustration of the palette.
+- A tag-driven release workflow: pushing `vX.Y.Z` checks the tag against
+  `package.json`, runs the suite through `prepublishOnly`, publishes to npm with
+  provenance via OIDC trusted publishing, and opens a GitHub release.
+- A `zizmor` workflow auditing the workflows themselves for Actions footguns.
+- `publishConfig.access: public` in `package.json`, so the package cannot be
+  published private by accident.
 
 ### Fixed
 

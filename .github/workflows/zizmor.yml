@@ -1,0 +1,36 @@
+---
+name: Check GitHub Actions
+
+# Audits the workflows in this repository for the usual Actions footguns:
+# untrusted input in run steps, over-broad permissions, unpinned actions,
+# credential persistence. Worth running because workflow files are the part of
+# a public repository that executes with a token attached.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  zizmor:
+    name: Check Actions security
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      # actions/checkout v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      # zizmorcore/zizmor-action v0.6.4
+      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482
+        with:
+          # Uploading results to code scanning needs a public repository.
+          # Flip this to true once the repository is public.
+          advanced-security: false
+          annotations: true
+          min-severity: low

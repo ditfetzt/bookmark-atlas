@@ -15,6 +15,9 @@
   "license": "MIT",
   "author": "Mæxim (https://github.com/ditfetzt)",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ditfetzt/bookmark-atlas.git"

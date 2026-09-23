@@ -1,5 +1,7 @@
 # Bookmark Atlas
 
+[![CI](https://img.shields.io/github/actions/workflow/status/ditfetzt/bookmark-atlas/ci.yml?branch=main&label=CI)](https://github.com/ditfetzt/bookmark-atlas/actions/workflows/ci.yml)
+
 <img src="assets/palette.svg" alt="The /bookmarks palette: typing a query narrows the list to the bookmarks that match" width="820">
 
 Turn your GitHub stars and X bookmarks into a local, searchable knowledge base for coding agents. Everything lives in one SQLite file, with full-text search over titles, descriptions, topics, and the captured text of every README, post, and article you saved.
