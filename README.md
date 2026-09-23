@@ -17,7 +17,7 @@ pi install npm:bookmark-atlas      # palette extension + agent skill
 npm install -g bookmark-atlas      # the CLI
 ```
 
-From source:
+From source (no build needed — Node runs the TypeScript directly):
 
 ```bash
 git clone https://github.com/ditfetzt/bookmark-atlas.git
@@ -36,7 +36,7 @@ node src/cli.ts search "local-first agents"
 
 ## Requirements
 
-- Node.js 24 or newer — the code uses the built-in `node:sqlite` with FTS5 and Node's native TypeScript type stripping, so there is no build step.
+- Node.js 24 or newer — the code uses the built-in `node:sqlite` with FTS5 and Node's native TypeScript type stripping. The published package ships compiled JavaScript, because Node refuses to strip types for files under `node_modules`; the repository is run from source with no build.
 - GitHub CLI authenticated with `gh auth login`, or a `BOOKMARK_ATLAS_GITHUB_TOKEN`.
 - Optional: [TweetXVault](https://github.com/lhl/tweetxvault) on `PATH` for `collect x`, or [Ego Browser](https://lite.ego.app/) for `capture x`.
 
@@ -114,8 +114,22 @@ The same read-only retrieval core is available over stdio:
 {
   "mcpServers": {
     "bookmark-atlas": {
+      "command": "bookmark-atlas",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Without a global install, point it at the compiled entry inside the repository
+(run `npm run build` first):
+
+```json
+{
+  "mcpServers": {
+    "bookmark-atlas": {
       "command": "node",
-      "args": ["/absolute/path/to/bookmark-atlas/src/cli.ts", "mcp"]
+      "args": ["/absolute/path/to/bookmark-atlas/dist/cli.js", "mcp"]
     }
   }
 }

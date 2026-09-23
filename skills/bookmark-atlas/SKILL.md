@@ -17,15 +17,19 @@ directories up from this file:
 
 ```text
 <package root>/skills/bookmark-atlas/SKILL.md   ← this file
-<package root>/src/cli.ts                       ← the CLI
+<package root>/dist/cli.js                      ← the CLI
 ```
 
-Resolve it once per session. Prefer an explicit override, then the skill's own
-location:
+Use `bookmark-atlas` if it is on `PATH` (a global install). Otherwise resolve the
+package root from this skill's own location and run the compiled entry:
 
 ```bash
 ATLAS="${BOOKMARK_ATLAS_ROOT:-<package root>}"
+ATLAS_CLI="node $ATLAS/dist/cli.js"
 ```
+
+Do not run `$ATLAS/src/cli.ts` from an installed package: Node refuses to strip
+TypeScript under `node_modules`, so that path only works in a source checkout.
 
 The database lives in your per-user data directory — `$BOOKMARK_ATLAS_DB` if
 set, otherwise `bookmarks.db` inside `$BOOKMARK_ATLAS_DATA_DIR`
@@ -33,8 +37,8 @@ set, otherwise `bookmarks.db` inside `$BOOKMARK_ATLAS_DATA_DIR`
 `~/.local/share/bookmark-atlas` on Linux). Never write a database into
 `node_modules`.
 
-Every command below is `node "$ATLAS/src/cli.ts" …`. If the package was
-installed globally, `bookmark-atlas …` on `PATH` is equivalent.
+Every command below is `$ATLAS_CLI …`, which is `bookmark-atlas …` when the
+package is installed globally.
 
 ## Recall for a task
 
@@ -44,7 +48,7 @@ reads the current project's dependency manifests, ranks saved bookmarks against
 the task, and returns why each matched plus the best passage.
 
 ```bash
-node "$ATLAS/src/cli.ts" recall "<what the user is trying to do>" \
+"$ATLAS_CLI" recall "<what the user is trying to do>" \
   --repo "$PWD" --limit 5
 ```
 
@@ -57,7 +61,7 @@ manifests, and ranks saved bookmarks against it. The user's `focus` (if given)
 leads; the git stage adds context.
 
 ```bash
-node "$ATLAS/src/cli.ts" recall --stage "<optional focus>" \
+"$ATLAS_CLI" recall --stage "<optional focus>" \
   --repo "$PWD" --limit 8
 ```
 
@@ -79,16 +83,16 @@ Behaviour:
 
 ```bash
 # full-text search across titles, descriptions, topics, captured content
-node "$ATLAS/src/cli.ts" search "local-first agents" --limit 10
+"$ATLAS_CLI" search "local-first agents" --limit 10
 
 # one source by id, with captured content
-node "$ATLAS/src/cli.ts" get <resource-id> --content
+"$ATLAS_CLI" get <resource-id> --content
 
 # attach a note explaining why a bookmark matters (searchable, ranked highly)
-node "$ATLAS/src/cli.ts" note <resource-id> "why this matters"
+"$ATLAS_CLI" note <resource-id> "why this matters"
 
 # counts and sync state
-node "$ATLAS/src/cli.ts" status
+"$ATLAS_CLI" status
 ```
 
 Search returns `id`, `title`, `url`, `description`, `snippet`, `savedAt`, and a
@@ -124,22 +128,22 @@ screen listing every key, `esc` close.
 
 The extension registers exactly two commands: `/bookmarks` and
 `/consult [focus]`. It is read-only — notes are written with the CLI
-(`node "$ATLAS/src/cli.ts" note <id> "text"`). Nothing is ever injected into
+(`"$ATLAS_CLI" note <id> "text"`). Nothing is ever injected into
 the prompt automatically; the user decides when to consult.
 
 ## Refresh
 
 ```bash
-node "$ATLAS/src/cli.ts" sync github              # latest stars
-node "$ATLAS/src/cli.ts" enrich github-readmes    # READMEs (incremental)
-node "$ATLAS/src/cli.ts" collect x                # X + all media (TweetXVault)
-node "$ATLAS/src/cli.ts" collect x --fast         # text only, no media
-node "$ATLAS/src/cli.ts" embed                    # optional macOS embeddings
+"$ATLAS_CLI" sync github              # latest stars
+"$ATLAS_CLI" enrich github-readmes    # READMEs (incremental)
+"$ATLAS_CLI" collect x                # X + all media (TweetXVault)
+"$ATLAS_CLI" collect x --fast         # text only, no media
+"$ATLAS_CLI" embed                    # optional macOS embeddings
 ```
 
 ## MCP alternative
 
 MCP-capable harnesses (Codex, Claude) expose the same data as the tools
 `search_bookmarks`, `suggest_for_task`, `get_bookmark`, and
-`related_bookmarks` through `node "$ATLAS/src/cli.ts" mcp`. pi does not speak
+`related_bookmarks` through `"$ATLAS_CLI" mcp`. pi does not speak
 MCP, so inside pi use the CLI or the palette above.

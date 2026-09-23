@@ -53,6 +53,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **The published `bin` pointed at `src/cli.ts`, which Node will not run from
+  inside `node_modules`** (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`). Every
+  global install got a `bookmark-atlas` command that crashed on first use, and
+  the palette's note and refresh actions failed the same way. The package now
+  ships `dist/`, compiled by `tsc`, and the `bin` and the palette both use it.
+  CI refuses to publish a tarball without `dist/cli.js`.
 - `--help` no longer advertises `use <resource-id>`. The command was removed
   with usage tracking in b013967, but its help line was left behind.
 - The CLI's `--help` now prints the database path it will actually use, instead

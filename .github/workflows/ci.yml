@@ -52,6 +52,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      - run: npm run build
       - run: npm pack --dry-run --json > /tmp/pack.json
       - name: Refuse to ship data or tests
         run: |
@@ -71,9 +72,13 @@ jobs:
               console.error("refusing to publish:", bad.join(", "));
               process.exit(1);
             }
-            if (!paths.includes("LICENSE")) {
-              console.error("LICENSE missing from tarball");
-              process.exit(1);
+            // dist/cli.js is the bin. Shipping without a build is the failure
+            // that would hand every user a CLI Node refuses to run.
+            for (const required of ["LICENSE", "dist/cli.js"]) {
+              if (!paths.includes(required)) {
+                console.error(`${required} missing from tarball`);
+                process.exit(1);
+              }
             }
             console.log(`${paths.length} files, no data/ or test/ entries`);
           '

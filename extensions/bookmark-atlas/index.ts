@@ -73,7 +73,12 @@ export function atlasDataDir(): string {
 
 const REPO_ROOT = resolveRepoRoot();
 const DB_PATH = process.env.BOOKMARK_ATLAS_DB ?? join(atlasDataDir(), "bookmarks.db");
-const CLI_PATH = join(REPO_ROOT, "src", "cli.ts");
+// The compiled CLI is preferred because Node refuses to strip TypeScript types
+// for files under node_modules, and an installed palette lives there. A source
+// checkout that has not been built still falls back to the TypeScript entry.
+const COMPILED_CLI = join(REPO_ROOT, "dist", "cli.js");
+const SOURCE_CLI = join(REPO_ROOT, "src", "cli.ts");
+const CLI_PATH = existsSync(COMPILED_CLI) ? COMPILED_CLI : SOURCE_CLI;
 // Rows visible in the list; also the jump size for PageUp/PageDown and Cmd+↑/↓.
 const LIST_ROWS = 10;
 // How far back "recent" reaches, and how many topics the picker will list.

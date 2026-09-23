@@ -27,12 +27,13 @@
     "url": "https://github.com/ditfetzt/bookmark-atlas/issues"
   },
   "bin": {
-    "bookmark-atlas": "./src/cli.ts"
+    "bookmark-atlas": "./dist/cli.js"
   },
   "engines": {
     "node": ">=24"
   },
   "files": [
+    "dist/",
     "src/",
     "extensions/",
     "skills/",
@@ -51,6 +52,7 @@
     ]
   },
   "scripts": {
+    "build": "tsc -p tsconfig.build.json",
     "sync:github": "node src/cli.ts sync github",
     "enrich:github": "node src/cli.ts enrich github-readmes",
     "import:x": "node src/cli.ts import x-json",
@@ -59,7 +61,7 @@
     "mcp": "node src/cli.ts mcp",
     "test": "node --test --test-concurrency=1",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run typecheck && npm test"
+    "prepublishOnly": "npm run build && npm run typecheck && npm test"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
