@@ -50,6 +50,8 @@ node src/cli.ts mcp                          # MCP server over stdio
 
 `get <id> --content` returns the primary captured content, every stored capture kind (post text, full article body, link title/description), and the bookmark's media with absolute file paths and MIME types.
 
+The primary capture is the one worth reading: a GitHub README, else an X article body, else the post text. An X article post carries both an `x_article` capture and an `x_post` one, and the `x_post` capture is either a bare `t.co` link or a scraped dump of the same article — so the body wins, in `get` and in the palette alike.
+
 By default the database is created at `./data/bookmarks.db`. Override it with `BOOKMARK_ATLAS_DB`.
 
 ## MCP integration

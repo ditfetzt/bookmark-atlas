@@ -51,6 +51,34 @@ test("returns resource metadata with an explicit trust boundary", () => {
   db.close();
 });
 
+test("reads the article body rather than the bare link that shares its bookmark", () => {
+  const db = openDatabase(":memory:");
+  seed(db);
+  // An X article post carries both captures; the x_post one is just a t.co link,
+  // and it is newer, so only a kind preference can pick the body.
+  db.exec(`
+    INSERT INTO resources (
+      id, canonical_url, resource_type, title, author, description,
+      language, created_at, updated_at
+    ) VALUES (
+      2, 'https://x.com/i/web/status/2099837130927427989', 'x_post',
+      'X post: https://t.co/nF3ZDklT3R', 'someone', NULL,
+      NULL, '2026-01-02T00:00:00Z', '2026-01-02T00:00:00Z'
+    );
+    INSERT INTO captures (resource_id, kind, source_url, fetched_at, content_hash, normalized_content)
+    VALUES
+      (2, 'x_post', 'https://x.com/i/web/status/2099837130927427989',
+       '2026-01-02T00:00:02Z', 'hash-post', 'https://t.co/nF3ZDklT3R'),
+      (2, 'x_article', 'https://x.com/i/web/status/2099837130927427989',
+       '2026-01-02T00:00:01Z', 'hash-article', 'A long article body worth keeping');
+  `);
+
+  const resource = getResource(db, 2, true);
+  assert.equal(resource?.capture?.content, "A long article body worth keeping");
+  assert.equal(resource?.capture?.contentHash, "hash-article");
+  db.close();
+});
+
 function seed(db: DatabaseSync): void {
   db.exec(`
     INSERT INTO resources (

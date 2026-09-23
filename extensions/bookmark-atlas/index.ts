@@ -257,8 +257,13 @@ function loadDetail(id: number): BookmarkDetail | null {
         WHERE resource_id = ? ORDER BY fetched_at DESC, id DESC
       `)
 			.all(id) as Array<{ kind: string; content: string }>;
+		// An X article post carries both an x_post capture (a bare t.co link, or a
+		// scraped dump of the same article) and an x_article capture with the real
+		// body. The body is the reason the bookmark exists, so it wins.
 		const primary =
-			captures.find((capture) => capture.kind === "x_post" || capture.kind === "github_readme") ??
+			captures.find((capture) => capture.kind === "x_article") ??
+			captures.find((capture) => capture.kind === "github_readme") ??
+			captures.find((capture) => capture.kind === "x_post") ??
 			captures.find((capture) => capture.content.trim()) ??
 			captures[0];
 		const media = db

@@ -18,9 +18,15 @@ export type SearchResult = {
   trust: "untrusted_external_content";
 };
 
-const PRIMARY_CAPTURE_KIND: Record<string, string> = {
-  x_post: "x_post",
-  github_repository: "github_readme",
+/**
+ * Which capture carries the real content for a resource type, in order of
+ * preference. An X article post also carries an x_post capture, but that is
+ * either a bare t.co link or a scraped dump of the same article, so the body
+ * of the article is what a reader wants.
+ */
+const PRIMARY_CAPTURE_KINDS: Record<string, string[]> = {
+  x_post: ["x_article", "x_post"],
+  github_repository: ["github_readme"],
 };
 
 export type MediaResult = {
@@ -193,15 +199,19 @@ export function getResource(
     topics = [];
   }
 
-  const primaryKind = PRIMARY_CAPTURE_KIND[row.resourceType] ?? null;
-  const primary = db.prepare(`
-    SELECT fetched_at AS fetchedAt, content_hash AS contentHash, normalized_content AS content
-    FROM captures
-    WHERE resource_id = ? AND (? IS NULL OR kind = ?)
-    ORDER BY fetched_at DESC, id DESC LIMIT 1
-  `).get(id, primaryKind, primaryKind) as
-    | { fetchedAt: string; contentHash: string; content: string }
-    | undefined;
+  const captures = db.prepare(`
+    SELECT kind, fetched_at AS fetchedAt, content_hash AS contentHash, normalized_content AS content
+    FROM captures WHERE resource_id = ? ORDER BY fetched_at DESC, id DESC
+  `).all(id) as Array<{ kind: string; fetchedAt: string; contentHash: string; content: string }>;
+  const chosen =
+    (PRIMARY_CAPTURE_KINDS[row.resourceType] ?? [])
+      .map((kind) => captures.find((capture) => capture.kind === kind))
+      .find((capture) => capture !== undefined) ??
+    captures.find((capture) => capture.content.trim()) ??
+    captures[0];
+  const primary = chosen
+    ? { fetchedAt: chosen.fetchedAt, contentHash: chosen.contentHash, content: chosen.content }
+    : undefined;
 
   const media = db.prepare(`
     SELECT media_key AS key, type, source, url, local_path AS path,
