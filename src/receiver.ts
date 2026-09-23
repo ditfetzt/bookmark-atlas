@@ -44,7 +44,6 @@ function tokenMatches(request: IncomingMessage, token: string): boolean {
 export type XCaptureServerOptions = {
   db: AtlasDatabase;
   token: string;
-  host?: string;
   port?: number;
 };
 
@@ -56,7 +55,9 @@ export type XCaptureServer = {
 
 export async function startXCaptureServer(options: XCaptureServerOptions): Promise<XCaptureServer> {
   if (!options.token.trim()) throw new Error("X capture token must not be empty");
-  const host = options.host ?? "127.0.0.1";
+  // Loopback only, and deliberately not configurable: this endpoint accepts
+  // unauthenticated-until-tokened writes of whatever the browser sends.
+  const host = "127.0.0.1";
   const sessions = new Map<string, Session>();
   const server = createServer(async (request, response) => {
     cors(response, typeof request.headers.origin === "string" ? request.headers.origin : undefined);

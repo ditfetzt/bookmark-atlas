@@ -12,7 +12,6 @@ type JsonNode = JsonObject | string | number | boolean | null | JsonNode[];
 
 export type XImportOptions = {
   account?: string;
-  maxFileBytes?: number;
   tweetxvaultDir?: string;
   /** Mark active saves missing from this import as unsaved. Use for a full collection import. */
   reconcile?: boolean;
@@ -183,7 +182,7 @@ function nativeArticle(tweet: JsonObject): NormalizedArticle | null {
   return { title, body: body ?? "" };
 }
 
-export function defaultTweetXVaultDir(): string {
+function defaultTweetXVaultDir(): string {
   if (process.env.BOOKMARK_ATLAS_TWEETXVAULT_DIR) return process.env.BOOKMARK_ATLAS_TWEETXVAULT_DIR;
   return process.platform === "darwin"
     ? join(homedir(), "Library", "Application Support", "tweetxvault")
@@ -714,7 +713,7 @@ export function repairXPosts(db: AtlasDatabase): RepairResult {
 }
 
 export function importXJsonFile(db: AtlasDatabase, file: string, options: XImportOptions = {}): XImportResult {
-  const maxBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
+  const maxBytes = DEFAULT_MAX_FILE_BYTES;
   const size = statSync(file).size;
   if (size > maxBytes) throw new Error(`X bookmark JSON exceeds ${maxBytes} byte limit`);
   let input: unknown;

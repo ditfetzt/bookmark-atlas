@@ -174,18 +174,6 @@ function migrate(db: AtlasDatabase): void {
       updated_at TEXT NOT NULL
     );
 
-    CREATE TABLE IF NOT EXISTS chunk_embeddings (
-      chunk_id INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
-      dim INTEGER NOT NULL,
-      vector BLOB NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS embedding_cache (
-      hash TEXT PRIMARY KEY,
-      dim INTEGER NOT NULL,
-      vector BLOB NOT NULL
-    );
-
     CREATE VIRTUAL TABLE IF NOT EXISTS resources_fts USING fts5(
       resource_id UNINDEXED,
       title,
@@ -196,6 +184,12 @@ function migrate(db: AtlasDatabase): void {
       tokenize = 'porter unicode61 remove_diacritics 2'
     );
   `);
+
+  // The on-device embedding tables went with the semantic-search feature. Drop
+  // them so an existing database does not keep thousands of orphaned vectors;
+  // IF EXISTS makes this a no-op on every open after the first.
+  db.exec("DROP TABLE IF EXISTS chunk_embeddings");
+  db.exec("DROP TABLE IF EXISTS embedding_cache");
 
   const checkpointColumns = db
     .prepare("PRAGMA table_info(sync_checkpoints)")

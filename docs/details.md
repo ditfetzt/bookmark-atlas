@@ -6,7 +6,7 @@ the README stays scannable.
 
 ## Where the database lives
 
-The database and the compiled embedding helper live in a per-user data
+The database lives in a per-user data
 directory (`~/Library/Application Support/bookmark-atlas/` on macOS), not in the
 checkout.
 
@@ -97,8 +97,8 @@ means unstarred repositories and unbookmarked posts accumulate as rows nothing
 can see.
 
 `prune` deletes resources with no active save, along with their captures,
-chunks, embeddings, media references, and full-text row. `--dry-run` reports the
-count without touching anything.
+chunks, media references, and full-text row. `--dry-run` reports the count
+without touching anything.
 
 ## Sort and date semantics
 
@@ -128,22 +128,8 @@ README, post, or article text, wrapped and scrolled with `↑↓` (a page at a t
 with `Fn+↑`/`Fn+↓`). `esc` returns to the list without closing the palette. The
 overlay keeps the same height, so nothing jumps when you toggle it.
 
-## Semantic search — experimental, off by default
-
-`scripts/macos-embed.swift` uses the sentence-embedding model built into macOS
-(512 dimensions, no download, no network, no third-party dependency).
-`node src/cli.ts embed` compiles it once, embeds every content chunk
-incrementally, and stores the vectors in SQLite. `recall --semantic` (or
-`BOOKMARK_ATLAS_SEMANTIC=1`) then adds a cosine-similarity ranking to the RRF
-fusion.
-
-It is off by default because it did not earn its place: measured against this
-corpus, the macOS model ranked short, generic X posts above the substantive
-READMEs, and results with and without it were nearly identical — matching the
-earlier finding that FTS beat the local macOS embedding model on the retrieval
-benchmark.
-
-It is kept as an opt-in seam for a stronger model. Point
-`BOOKMARK_ATLAS_EMBED_BIN` at any binary that maps a JSON array of strings to a
-JSON array of vectors. A real sentence-transformer (for example through ONNX) or
-an embedding API is what would actually move the needle.
+Tokenizing and ranking are written twice — once in `src/search.ts` and once in
+the palette, which cannot import it (see above). `test/parity.test.ts` asserts
+the stop-word list and the `resources_fts` column weights stay identical, because
+they had already drifted once: the palette was missing 33 stop words, so the same
+query ranked differently in the two.

@@ -14,14 +14,30 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   database inside `node_modules` when installed as a package. Both now resolve
   `$BOOKMARK_ATLAS_DATA_DIR` (default: `~/Library/Application Support/bookmark-atlas`
   on macOS, `~/.local/share/bookmark-atlas` on Linux,
-  `%LOCALAPPDATA%\bookmark-atlas` on Windows). The compiled embedding helper
-  moved with it. `BOOKMARK_ATLAS_DB` still overrides the full path.
+  `%LOCALAPPDATA%\bookmark-atlas` on Windows). `BOOKMARK_ATLAS_DB` still
+  overrides the full path.
 
   To upgrade, move `bookmarks.db` (and any `-wal`/`-shm` siblings) into the new
   directory, or set `BOOKMARK_ATLAS_DB` to where you keep it.
 
 - The README is now a front door; the long-form rationale lives in
   [docs/details.md](docs/details.md).
+
+### Removed
+
+- **Semantic search, and the on-device embedding stack behind it.** It was off
+  by default and measured as no better than keyword ranking, so it was kept only
+  as a seam for a future model. Gone with it: `src/embeddings.ts`,
+  `scripts/macos-embed.swift`, the `embed` command, the `recall --semantic` flag
+  and `BOOKMARK_ATLAS_SEMANTIC`, `BOOKMARK_ATLAS_EMBED_BIN`, and the
+  `chunk_embeddings` and `embedding_cache` tables. Opening an existing database
+  now drops those two tables, so the vectors they held are released.
+- Four option fields no caller ever set: `XImportOptions.maxFileBytes`,
+  `EnrichOptions.maxBytes`, `CollectXOptions.executable` (the
+  `BOOKMARK_ATLAS_TWEETXVAULT_BIN` env var already covers it), and
+  `XCaptureServerOptions.host`. The capture receiver is now hard-wired to
+  loopback rather than merely defaulting to it.
+- `--cases`, a leftover in the flag parser from the benchmark command.
 
 ### Added
 
@@ -35,5 +51,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with usage tracking in b013967, but its help line was left behind.
 - The CLI's `--help` now prints the database path it will actually use, instead
   of a hardcoded string that had gone stale.
+- The palette tokenized queries with 33 fewer stop words than the CLI, so the
+  same query could rank differently in the two. The lists are now identical, and
+  `test/parity.test.ts` fails if they drift apart again.
 
 [Unreleased]: https://github.com/ditfetzt/bookmark-atlas/commits/main

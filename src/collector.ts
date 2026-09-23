@@ -9,7 +9,6 @@ export type CollectXOptions = {
   account?: string;
   full?: boolean;
   keepExport?: boolean;
-  executable?: string;
   fast?: boolean;
 };
 
@@ -40,7 +39,7 @@ function resolveXAccount(db: AtlasDatabase, explicit?: string): string {
 }
 
 export function collectXBookmarks(db: AtlasDatabase, options: CollectXOptions = {}): XImportResult & { exportPath?: string } {
-  const executable = options.executable ?? process.env.BOOKMARK_ATLAS_TWEETXVAULT_BIN ?? "tweetxvault";
+  const executable = process.env.BOOKMARK_ATLAS_TWEETXVAULT_BIN ?? "tweetxvault";
   const directory = mkdtempSync(join(tmpdir(), "bookmark-atlas-x-"));
   const exportPath = join(directory, "bookmarks.json");
   try {

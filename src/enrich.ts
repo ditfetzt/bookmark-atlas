@@ -12,7 +12,6 @@ type RepositoryTarget = {
 export type EnrichOptions = {
   limit?: number;
   concurrency?: number;
-  maxBytes?: number;
   fetchImpl?: typeof fetch;
   token?: string;
 };
@@ -201,7 +200,7 @@ export async function enrichGitHubReadmes(
   const selected = targets(db, limit);
   const token = options.token ?? resolveGitHubToken();
   const fetchImpl = options.fetchImpl ?? fetch;
-  const maxBytes = options.maxBytes ?? 2 * 1024 * 1024;
+  const maxBytes = 2 * 1024 * 1024;
   const outcomes: Array<"enriched" | "unchanged" | "missing" | "failed"> = [];
   let next = 0;
 

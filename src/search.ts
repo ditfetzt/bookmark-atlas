@@ -72,6 +72,8 @@ export type ResourceResult = {
   contents?: ContentCapture[];
 };
 
+// Kept identical to SEARCH_STOP_WORDS in the palette extension, which cannot
+// import this module; test/parity.test.ts fails if the two lists drift apart.
 const STOP_WORDS = new Set([
   "a", "an", "and", "for", "from", "in", "into", "of", "on", "or", "over", "the", "to", "with",
   "is", "are", "was", "be", "been", "being", "it", "its", "this", "that", "these", "those",
@@ -104,6 +106,12 @@ export function searchResources(
   const ftsQuery = toFtsQuery(query);
   if (!ftsQuery) return [];
 
+  // FTS5 column weights for resources_fts, in column order: resource_id, title,
+  // description, topics, language, content. A title hit outranks a description
+  // hit, which outranks a hit buried in a README. Written inline because FTS5
+  // needs the weights in the SQL itself; the same vector also appears in
+  // recall.ts and in the palette extension, and test/parity.test.ts asserts that
+  // all three copies stay identical.
   const rows = db.prepare(`
     SELECT
       r.id,

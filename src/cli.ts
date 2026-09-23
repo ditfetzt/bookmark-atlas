@@ -3,7 +3,6 @@ import { atlasDataDir, databasePath, openDatabase, pruneOrphanResources, refresh
 import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
 import { recall, relatedResources } from "./recall.ts";
-import { buildEmbeddings, embedQuery, embeddingsAvailable } from "./embeddings.ts";
 import { collectStage } from "./stage.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile, repairXPosts } from "./x.ts";
@@ -17,14 +16,13 @@ function optionValue(args: string[], name: string): string | undefined {
 }
 
 // Only these flags consume the next argument. Boolean flags (--stage, --fast,
-// --semantic, --clear, ...) must not swallow the positional text that follows.
+// --clear, ...) must not swallow the positional text that follows.
 const VALUE_FLAGS = new Set([
   "--limit",
   "--repo",
   "--account",
   "--concurrency",
   "--port",
-  "--cases",
 ]);
 
 function positional(args: string[]): string[] {
@@ -52,9 +50,8 @@ Usage:
   bookmark-atlas collect x [--account NAME] [--full] [--fast] [--keep-export]
   bookmark-atlas capture x [--port N]
   bookmark-atlas search <query> [--limit N]
-  bookmark-atlas recall <task> [--repo PATH] [--limit N] [--semantic] [--stage]
+  bookmark-atlas recall <task> [--repo PATH] [--limit N] [--stage]
   bookmark-atlas related <resource-id> [--limit N]
-  bookmark-atlas embed [--limit N]
   bookmark-atlas get <resource-id> [--content]
   bookmark-atlas note <resource-id> <text...> [--clear]
   bookmark-atlas status
@@ -147,10 +144,6 @@ async function main(): Promise<void> {
       const stage = useStage && repoPath ? collectStage(repoPath, focus) : null;
       if (!focus && !stage) throw new Error("recall found nothing to work with; pass a task description");
       const limit = Number.parseInt(optionValue(args, "--limit") ?? "5", 10);
-      // Semantic ranking is opt-in: measured against this corpus it did not beat
-      // keyword ranking. See the README.
-      const semantic = args.includes("--semantic") || process.env.BOOKMARK_ATLAS_SEMANTIC === "1";
-      const queryVector = semantic ? embedQuery(db, focus || stage?.description || "") : null;
       if (stage) process.stderr.write(`stage: branch=${stage.branch ?? "?"} · ${stage.commits.length} commits · ${stage.files.length} files\n`);
       console.log(
         JSON.stringify(
@@ -159,7 +152,6 @@ async function main(): Promise<void> {
             ...(repoPath ? { repoPath } : {}),
             ...(stage ? { stage: stage.description } : {}),
             limit,
-            queryVector,
           }),
           null,
           2,
@@ -173,16 +165,6 @@ async function main(): Promise<void> {
       if (!Number.isFinite(id) || id < 1) throw new Error("related requires a numeric resource id");
       const limit = Number.parseInt(optionValue(args, "--limit") ?? "10", 10);
       console.log(JSON.stringify(relatedResources(db, id, { limit }), null, 2));
-      return;
-    }
-
-    if (command === "embed") {
-      const rawLimit = optionValue(args, "--limit");
-      const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
-      if (rawLimit && (!Number.isSafeInteger(limit) || (limit ?? 0) < 1)) {
-        throw new Error("--limit must be a positive integer");
-      }
-      console.log(JSON.stringify(buildEmbeddings(db, limit ? { limit } : {}), null, 2));
       return;
     }
 
@@ -265,8 +247,7 @@ async function main(): Promise<void> {
           (SELECT COUNT(*) FROM resources_fts) AS indexedResources,
           (SELECT COUNT(*) FROM captures WHERE kind = 'github_readme') AS readmeCaptures,
           (SELECT COUNT(*) FROM x_posts) AS xPosts,
-          (SELECT COUNT(*) FROM chunks) AS chunks,
-          (SELECT COUNT(*) FROM chunk_embeddings) AS embeddedChunks
+          (SELECT COUNT(*) FROM chunks) AS chunks
       `).get();
       const sync = db.prepare(`
         SELECT i.provider, i.account, c.high_watermark AS highWatermark,
@@ -280,7 +261,6 @@ async function main(): Promise<void> {
         JSON.stringify(
           {
             database: databasePath(),
-            embeddings: embeddingsAvailable(),
             counts,
             sync,
           },

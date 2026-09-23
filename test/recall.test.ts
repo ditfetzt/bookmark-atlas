@@ -217,43 +217,6 @@ test("a vague task falls back to the project's own description", () => {
   db.close();
 });
 
-test("a strong semantic match surfaces without keyword overlap", () => {
-  const db = openDatabase(":memory:");
-  db.exec(`
-    INSERT INTO integrations (id, provider, account, created_at, updated_at)
-    VALUES (1, 'github', 'test', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-    INSERT INTO resources (id, canonical_url, resource_type, title, author, description, language, created_at, updated_at)
-    VALUES
-      (1, 'https://github.com/example/vector-search', 'github_repository', 'example/vector-search', 'example',
-       'Vector search and embeddings', 'TypeScript', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-      (2, 'https://github.com/example/sourdough', 'github_repository', 'example/sourdough', 'example',
-       'Baking bread', 'JavaScript', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-    INSERT INTO saves (integration_id, provider_external_id, resource_id, saved_at, created_at, updated_at)
-    VALUES (1, 'R1', 1, '2026-09-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'),
-           (1, 'R2', 2, '2026-09-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-    INSERT INTO captures (id, resource_id, kind, source_url, fetched_at, content_hash, normalized_content)
-    VALUES (1, 1, 'github_readme', 'https://github.com/example/vector-search', '2026-09-01T00:00:00Z', 'h1',
-            'semantic search notes');
-  `);
-  refreshResourceFts(db, 1);
-  refreshResourceFts(db, 2);
-  db.prepare(
-    "INSERT INTO chunks (id, capture_id, ordinal, text, token_count, content_hash) VALUES (1, 1, 0, ?, 3, 'c1')",
-  ).run("semantic search notes");
-  const vector = new Float32Array(512);
-  vector[0] = 1;
-  db.prepare("INSERT INTO chunk_embeddings (chunk_id, dim, vector) VALUES (1, 512, ?)").run(
-    Buffer.from(vector.buffer),
-  );
-
-  const hits = recall(db, { task: "zzz unrelated qqq", limit: 5, queryVector: Array.from(vector) });
-
-  assert.ok(hits.some((hit) => hit.id === 1), "expected the semantically matching resource");
-  assert.equal(hits.some((hit) => hit.id === 2), false);
-  assert.ok(hits[0]?.whyMatched.some((reason) => reason.startsWith("semantic match")));
-  db.close();
-});
-
 test("recall uses the stage as project context for a vague task", () => {
   const db = openDatabase(":memory:");
   db.exec(`

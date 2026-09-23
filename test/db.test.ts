@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
-import { atlasDataDir, databasePath } from "../src/db.ts";
+import { atlasDataDir, databasePath, openDatabase } from "../src/db.ts";
 import { atlasDataDir as paletteDataDir } from "../extensions/bookmark-atlas/index.ts";
 
 /** Run `body` with the named env vars set (undefined deletes), then restore. */
@@ -60,4 +62,47 @@ test("BOOKMARK_ATLAS_DB still wins over the data directory", () => {
   withEnv({ BOOKMARK_ATLAS_DATA_DIR: "/tmp/atlas-ignored", BOOKMARK_ATLAS_DB: "/tmp/custom.db" }, () => {
     assert.equal(databasePath(), "/tmp/custom.db");
   });
+});
+
+// The semantic-search feature was removed, and its two tables with it. An
+// existing database still carries them, so opening one has to drop them without
+// disturbing anything else.
+test("opening a database from before the embedding removal drops its tables", () => {
+  const dir = mkdtempSync(join(tmpdir(), "atlas-legacy-"));
+  const path = join(dir, "bookmarks.db");
+  const legacyTables = (handle: DatabaseSync) =>
+    handle
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table'" +
+          " AND name IN ('chunk_embeddings', 'embedding_cache')",
+      )
+      .all()
+      .map((row) => (row as { name: string }).name);
+  const integrity = (handle: DatabaseSync) =>
+    (handle.prepare("PRAGMA integrity_check").get() as { integrity_check: string } | undefined)
+      ?.integrity_check;
+
+  try {
+    const legacy = new DatabaseSync(path);
+    legacy.exec(`
+      CREATE TABLE chunk_embeddings (chunk_id INTEGER PRIMARY KEY, dim INTEGER NOT NULL, vector BLOB NOT NULL);
+      CREATE TABLE embedding_cache (hash TEXT PRIMARY KEY, dim INTEGER NOT NULL, vector BLOB NOT NULL);
+      INSERT INTO chunk_embeddings VALUES (1, 4, x'00');
+      INSERT INTO embedding_cache VALUES ('h', 4, x'00');
+    `);
+    legacy.close();
+
+    const db = openDatabase(path);
+    assert.deepEqual(legacyTables(db), [], "both embedding tables should be gone");
+    assert.equal(integrity(db), "ok");
+    db.close();
+
+    // Re-opening must not trip over the now-missing tables.
+    const reopened = openDatabase(path);
+    assert.deepEqual(legacyTables(reopened), []);
+    assert.equal(integrity(reopened), "ok");
+    reopened.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

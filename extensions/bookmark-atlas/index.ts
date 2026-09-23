@@ -210,15 +210,20 @@ function loadBookmarks(): Bookmark[] {
 }
 
 // Content search: the palette filter is fuzzy over metadata, this adds the
-// captured text so a query can match a README, post, or article body. Same
-// tokenising rules as src/search.ts, which the extension cannot import because
-// it is symlinked into pi's extensions directory.
+// captured text so a query can match a README, post, or article body. Kept
+// identical to STOP_WORDS in src/search.ts — this module cannot import it when
+// the extension is symlinked into pi's extensions directory, so
+// test/parity.test.ts fails if the two lists drift apart again.
 const SEARCH_STOP_WORDS = new Set([
 	"a", "an", "and", "for", "from", "in", "into", "of", "on", "or", "over", "the", "to", "with",
 	"is", "are", "was", "be", "been", "being", "it", "its", "this", "that", "these", "those",
-	"i", "me", "my", "we", "our", "you", "your", "do", "does", "did", "can", "could",
-	"should", "would", "will", "how", "what", "when", "where", "why", "there", "here", "any", "some",
-	"ok", "okay", "nice", "cool", "thanks", "please", "just", "really", "maybe", "sure",
+	"i", "me", "my", "we", "our", "you", "your", "he", "she", "they", "them", "their",
+	"do", "does", "did", "can", "could", "should", "would", "will", "shall", "may", "might",
+	"what", "which", "who", "whom", "how", "when", "where", "why", "there", "here", "any", "some",
+	"das", "der", "die", "ein", "eine", "für", "im", "mit", "oder", "und", "von", "zu",
+	// Conversational filler that should never drive a search.
+	"ok", "okay", "nice", "cool", "yeah", "yep", "thanks", "thank", "please", "just",
+	"really", "maybe", "sure", "hello", "hey", "hi", "so", "well", "actually", "basically",
 ]);
 
 let searchConnection: DatabaseSync | null = null;
@@ -228,7 +233,7 @@ let contentCache: { query: string; ids: number[] } | null = null;
 function contentMatchIds(query: string): number[] {
 	if (contentCache?.query === query) return contentCache.ids;
 	const tokens = (query.normalize("NFKC").match(/[\p{L}\p{N}]+/gu) ?? []).filter(
-		(token) => token.length > 1 && !SEARCH_STOP_WORDS.has(token.toLocaleLowerCase()),
+		(token) => !SEARCH_STOP_WORDS.has(token.toLocaleLowerCase()),
 	);
 	if (tokens.length === 0 || !existsSync(DB_PATH)) return [];
 	const ftsQuery = tokens.map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
@@ -239,6 +244,7 @@ function contentMatchIds(query: string): number[] {
 			.prepare(`
         SELECT resource_id AS id FROM resources_fts
         WHERE resources_fts MATCH ?
+        -- Same column weights as src/search.ts; see test/parity.test.ts.
         ORDER BY bm25(resources_fts, 0.0, 10.0, 5.0, 3.0, 1.0, 2.0)
         LIMIT 200
       `)

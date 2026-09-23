@@ -56,7 +56,6 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 | `related <id>` | What relates to one bookmark, and why |
 | `get <id> [--content]` | One source's metadata, optionally with its full text |
 | `note <id> "text"` \| `--clear` | Attach a searchable note explaining why it matters |
-| `embed` | Build optional on-device embeddings (macOS) |
 | `status` | Counts and sync state |
 | `prune [--dry-run]` | Delete resources with no active save |
 | `mcp` | MCP server over stdio |
@@ -131,7 +130,7 @@ All four are read-only. Returned bookmark and README text is always marked `untr
 
 ## Where your data lives
 
-By default the database and the compiled embedding helper sit in your per-user data directory, never in the checkout or inside an installed package:
+By default the database sits in your per-user data directory, never in the checkout or inside an installed package:
 
 | Platform | Path |
 | --- | --- |
@@ -147,7 +146,6 @@ By default the database and the compiled embedding helper sit in your per-user d
 | `BOOKMARK_ATLAS_TWEETXVAULT_BIN` | TweetXVault executable (default `tweetxvault`) |
 | `BOOKMARK_ATLAS_TWEETXVAULT_DIR` | TweetXVault data dir, used to resolve media paths |
 | `BOOKMARK_ATLAS_X_CAPTURE_TOKEN` | Required token for `capture x` |
-| `BOOKMARK_ATLAS_EMBED_BIN` | Override the embedding helper binary |
 
 The database is **not encrypted**, and it holds the full text of everything you saved. It is gitignored for that reason — do not commit it, and do not point `BOOKMARK_ATLAS_DB` at a shared or synced folder unless you accept that.
 
@@ -161,7 +159,6 @@ Built on other people's work. Nothing here is a fork, and no code was copied fro
 - **Reciprocal Rank Fusion** — Cormack, Clarke & Buettcher, *Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods*, SIGIR 2009. The fusion in `src/recall.ts`.
 - **[lhl/tweetxvault](https://github.com/lhl/tweetxvault)** (Apache-2.0) — `collect x` drives its CLI to archive X bookmarks.
 - **[Ego Browser](https://lite.ego.app/)** — the CDP bridge that `capture x` receives native tweet batches from.
-- **Apple NaturalLanguage** — `scripts/macos-embed.swift` calls `NLEmbedding` for the optional on-device embeddings.
 
 ## Contributing
 

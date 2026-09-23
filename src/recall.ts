@@ -1,15 +1,12 @@
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import type { AtlasDatabase } from "./db.ts";
-import { vectorRank } from "./embeddings.ts";
 import { getResource, searchResources, tokenize, type SearchResult } from "./search.ts";
 
 export type RecallOptions = {
   task: string;
   repoPath?: string;
   limit?: number;
-  /** Precomputed query embedding; omit to skip semantic ranking. */
-  queryVector?: number[] | null;
   /** Where the project is right now (recent work); adds secondary context terms. */
   stage?: string;
 };
@@ -65,8 +62,6 @@ const MIN_COVERAGE_RATIO = 0.3;
 const RRF_K = 60;
 /** RRF scores are small; scale them to sit alongside the flat boosts. */
 const RRF_SCALE = 100;
-/** Minimum cosine similarity for a semantic match to count on its own. */
-const MIN_SIMILARITY = 0.4;
 const RRF_LIMIT_MULTIPLIER = 8;
 
 // Dependency names too generic to be a useful repo-name signal.
@@ -551,20 +546,6 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     addRanked(rankResourceFts(db, `{title description topics} : (${contextMatch})`, rankedLimit), 0.45);
   }
 
-  // Semantic ranking from on-device embeddings, when a query vector is available.
-  const vectorMatches = new Map<number, number>();
-  if (options.queryVector && options.queryVector.length > 0) {
-    const hits = vectorRank(db, options.queryVector, rankedLimit);
-    addRanked(
-      hits.map((hit) => hit.resourceId),
-      1.2,
-    );
-    for (const hit of hits) {
-      candidates.add(hit.resourceId);
-      if (hit.score >= MIN_SIMILARITY) vectorMatches.set(hit.resourceId, hit.score);
-    }
-  }
-
   // Whether the task matched anything at all. If it did, results that only match
   // project context are noise; if it did not, context is all we have.
   const taskHasMatches = [...candidates].some((id) =>
@@ -584,9 +565,7 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     // Common words must not carry a result: require real weighted coverage,
     // and when the task is specific it has to be a task term that matched.
     const taskCoverage = matchedPrimary.reduce((sum, token) => sum + idf(token), 0);
-    const vectorScore = vectorMatches.get(id);
-    // A strong semantic match is a match on its own, even without keyword overlap.
-    if (dependencies.length === 0 && vectorScore === undefined) {
+    if (dependencies.length === 0) {
       if (taskTokens.length === 0) {
         // No explicit task: the stage/project context *is* the query, so require
         // two of its terms rather than a share of a long, noisy description.
@@ -620,7 +599,6 @@ export function recall(db: AtlasDatabase, options: RecallOptions): RecallHit[] {
     }
     if (metaMatched) reasons.push("metadata match");
     if (passageMatched) reasons.push("passage match");
-    if (vectorScore !== undefined) reasons.push(`semantic match (${vectorScore.toFixed(2)})`);
     for (const dependency of dependencies) reasons.push(`dependency: ${dependency}`);
 
     scored.push({
