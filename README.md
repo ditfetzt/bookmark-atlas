@@ -121,7 +121,7 @@ node src/cli.ts note 406 "Closest blueprint: hybrid BM25+vector with RRF and a c
 
 Notes are searchable, returned by `get` and `recall`, and shown in the pi palette. They are the one thing recall cannot infer, so they are the strongest relevance signal you can give it.
 
-Notes are written with the CLI (`note`); the pi extension stays read-only, so there is nothing to configure there.
+Write a note from the CLI (`node src/cli.ts note <id> "why this matters"`), or in the palette with `ctrl+n` while looking at the bookmark — `enter` saves it, `esc` abandons the edit. The extension shells out to the CLI for the write, so its own database connection stays read-only.
 
 ### Semantic search — experimental, off by default
 
@@ -163,7 +163,7 @@ Media files are never copied. `x_media.local_path` points into TweetXVault's med
 /bookmarks local-first agents
 ```
 
-Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (best match → newest → oldest → stars → A–Z), `ctrl+r` fetch new bookmarks in the background, `ctrl+e` read the full text, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
+Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (best match → newest → oldest → stars → A–Z), `ctrl+r` fetch new bookmarks in the background, `ctrl+e` read the full text, `ctrl+n` write a note, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
 
 Each row is numbered by its position in the current view, so the number stays stable while you scroll, filter, or sort.
 

@@ -10,6 +10,8 @@
  *   ctrl+y   copy the url
  *   ctrl+o   open the url in the default browser
  *   ctrl+r   fetch new bookmarks (GitHub stars, X posts, READMEs)
+ *   ctrl+e   read the full text
+ *   ctrl+n   write a note about the selected bookmark
  *   esc      close
  *
  * Reads the Bookmark Atlas SQLite database directly (read-only). Override the
@@ -116,7 +118,7 @@ type PaletteOptions = {
 	/** Repaint hook, so async work (a background refresh) can update the overlay. */
 	requestRender?: () => void;
 	/** Test seam: how one refresh step is executed. Defaults to the real CLI. */
-	refreshRunner?: CliRunner;
+	cliRunner?: CliRunner;
 };
 
 /** Record that a bookmark was used. Best effort: never break the palette. */
@@ -310,14 +312,15 @@ export class BookmarkPalette implements Component, Focusable {
 	private sortMode: SortMode = "relevance";
 	private unseenOnly = false;
 	private reading = false;
+	private noteEdit: { id: number; input: Input } | null = null;
 	private preview: { id: number; offset: number } | null = null;
 	/** Recorded by render so input handling can clamp the scroll without re-wrapping. */
 	private previewTotal = 0;
 	private readonly requestRender: (() => void) | undefined;
-	private readonly refreshRunner: CliRunner;
+	private readonly cliRunner: CliRunner;
 	private refreshing = false;
 	private showHelp = false;
-	private refreshStatus: string | null = null;
+	private notice: string | null = null;
 	private readonly details = new Map<number, BookmarkDetail | null>();
 	private readonly images = new Map<number, Image | null>();
 
@@ -337,7 +340,7 @@ export class BookmarkPalette implements Component, Focusable {
 		this.ranked = Boolean(options.rankedIds);
 		this.reasons = options.reasons ?? new Map();
 		this.requestRender = options.requestRender;
-		this.refreshRunner = options.refreshRunner ?? runCli;
+		this.cliRunner = options.cliRunner ?? runCli;
 		this.theme = theme;
 		this.done = done;
 		this.input = new Input({ placeholder: "Search title, author, description, url…" });
@@ -466,7 +469,7 @@ export class BookmarkPalette implements Component, Focusable {
 	async refresh(): Promise<void> {
 		if (this.refreshing) return;
 		if (!existsSync(CLI_PATH)) {
-			this.refreshStatus = "refresh unavailable: CLI not found";
+			this.notice = "refresh unavailable: CLI not found";
 			this.requestRender?.();
 			return;
 		}
@@ -480,9 +483,9 @@ export class BookmarkPalette implements Component, Focusable {
 		let failed = false;
 		try {
 			for (const step of steps) {
-				this.refreshStatus = `↻ refreshing ${step.label}\u2026`;
+				this.notice = `↻ refreshing ${step.label}\u2026`;
 				this.requestRender?.();
-				const result = await this.refreshRunner(step.args);
+				const result = await this.cliRunner(step.args);
 				if (!result.ok) {
 					failed = true;
 					parts.push(`${step.label} failed`);
@@ -499,9 +502,49 @@ export class BookmarkPalette implements Component, Focusable {
 			this.images.clear();
 			this.filtered = this.applyFilter(this.input.getValue());
 			this.selected = Math.min(this.selected, Math.max(0, this.filtered.length - 1));
-			this.refreshStatus = `${failed ? "⚠" : "✓"} ${parts.join(" · ")}`;
+			this.notice = `${failed ? "⚠" : "✓"} ${parts.join(" · ")}`;
 			this.requestRender?.();
 		}
+	}
+
+	/** Keys while writing a note: enter saves it, esc cancels, anything else edits. */
+	private handleNoteInput(data: string): void {
+		const edit = this.noteEdit;
+		if (!edit) return;
+		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+			this.noteEdit = null;
+			this.requestRender?.();
+			return;
+		}
+		if (matchesKey(data, "return")) {
+			const text = edit.input.getValue().trim();
+			this.noteEdit = null;
+			void this.saveNote(edit.id, text);
+			return;
+		}
+		edit.input.handleInput(data);
+		this.requestRender?.();
+	}
+
+	/**
+	 * Write the note through the CLI, which owns both the note write and the FTS
+	 * refresh, so the extension keeps its read-only database connection.
+	 */
+	private async saveNote(id: number, text: string): Promise<void> {
+		const bookmark = this.items.find((item) => item.id === id);
+		const previous = bookmark?.context ?? null;
+		if (bookmark) bookmark.context = text || null;
+		this.notice = "✎ saving note…";
+		this.requestRender?.();
+		const result = await this.cliRunner(["note", String(id), text]);
+		if (!result.ok && bookmark) {
+			bookmark.context = previous;
+			this.notice = "✎ note not saved";
+		} else {
+			this.notice = text ? "✎ note saved" : "✎ note cleared";
+			contentCache = null;
+		}
+		this.requestRender?.();
 	}
 
 	/** Keys while the reading pane is open: scroll the text, esc returns to the list. */
@@ -541,6 +584,10 @@ export class BookmarkPalette implements Component, Focusable {
 			this.handleReadingInput(data);
 			return;
 		}
+		if (this.noteEdit) {
+			this.handleNoteInput(data);
+			return;
+		}
 		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
 			this.done({ action: "cancel" });
 			return;
@@ -571,6 +618,16 @@ export class BookmarkPalette implements Component, Focusable {
 			this.reading = true;
 			this.preview = null;
 			this.requestRender?.();
+			return;
+		}
+		if (matchesKey(data, "ctrl+n")) {
+			const bookmark = this.selectedBookmark();
+			if (bookmark) {
+				const input = new Input({ placeholder: "Why does this bookmark matter?" });
+				input.setValue(bookmark.context ?? "");
+				this.noteEdit = { id: bookmark.id, input };
+				this.requestRender?.();
+			}
 			return;
 		}
 		// Jump navigation. macOS sends Fn+←/→ as home/end and Fn+↑/↓ as pageUp/pageDown;
@@ -664,6 +721,7 @@ export class BookmarkPalette implements Component, Focusable {
 			theme.fg("accent", "Act"),
 			key("enter", "insert title, url and content into the editor"),
 			key("ctrl+e", "read the full README or post text"),
+			key("ctrl+n", "write a note: why this matters to you"),
 			key("ctrl+y", "copy the url"),
 			key("ctrl+o", "open in the browser"),
 			key("ctrl+r", "fetch new bookmarks (GitHub, X, READMEs)"),
@@ -682,6 +740,7 @@ export class BookmarkPalette implements Component, Focusable {
 	render(width: number): string[] {
 		if (this.showHelp) return this.renderHelp(width);
 		this.input.focused = this.focused;
+		if (this.noteEdit) this.noteEdit.input.focused = this.focused;
 		const theme = this.theme;
 		const innerWidth = Math.max(20, width - 4);
 		const pad = (text: string): string => {
@@ -704,7 +763,13 @@ export class BookmarkPalette implements Component, Focusable {
 					),
 			),
 		);
-		lines.push(row(this.input.render(innerWidth)[0] ?? ""));
+		lines.push(
+			row(
+				this.noteEdit
+					? theme.fg("accent", "✎ note: ") + (this.noteEdit.input.render(innerWidth - 8)[0] ?? "")
+					: (this.input.render(innerWidth)[0] ?? ""),
+			),
+		);
 		const counts = this.sourceCounts();
 		const unseenCount = this.items.filter((bookmark) => bookmark.useCount === 0).length;
 		// Without a query (or a consult ranking) there is nothing to be relevant to.
@@ -727,7 +792,7 @@ export class BookmarkPalette implements Component, Focusable {
 					chip("X", "x", counts.x) +
 					toggle(`unseen ${unseenCount}`, this.unseenOnly) +
 					theme.fg("dim", ` sort:${sortLabel} `) +
-					theme.fg("dim", this.refreshStatus ?? "tab/ctrl+u/ctrl+s/ctrl+r · ? help"),
+					theme.fg("dim", this.notice ?? "tab/ctrl+u/ctrl+s/ctrl+r · ? help"),
 			),
 		);
 		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
@@ -833,9 +898,11 @@ export class BookmarkPalette implements Component, Focusable {
 		lines.push(
 			theme.fg(
 				"dim",
-				reading
-					? "  ↑↓ scroll · enter insert · esc back · ? help"
-					: "  ↑↓ navigate · enter insert · ctrl+e read · ctrl+y copy · ctrl+o open · esc close",
+				this.noteEdit
+					? "  enter save note · esc cancel"
+					: reading
+						? "  ↑↓ scroll · enter insert · esc back · ? help"
+						: "  ↑↓ navigate · enter insert · ctrl+e read · ctrl+n note · esc close",
 			),
 		);
 		return lines;

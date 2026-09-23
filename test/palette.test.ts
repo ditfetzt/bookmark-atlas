@@ -15,9 +15,10 @@ type Harness = {
   handleInput(data: string): void;
   refresh(): Promise<void>;
   selected: number;
-  refreshStatus: string | null;
+  notice: string | null;
   showHelp: boolean;
   reading: boolean;
+  noteEdit: { id: number; input: { getValue(): string } } | null;
   preview: { id: number; offset: number } | null;
   filtered: Array<{ id: number; title: string }>;
   input: { getValue(): string; setValue(value: string): void };
@@ -60,6 +61,7 @@ function typeQuery(list: Harness, query: string): void {
 
 const CTRL_R = "\x12";
 const CTRL_E = "\x05";
+const CTRL_N = "\x0e";
 const F1 = "\x1bOP";
 const ESCAPE = "\x1b";
 
@@ -121,34 +123,34 @@ test("refresh runs every source in order and reports what changed", async () => 
     ok: true,
     stdout: JSON.stringify(args[0] === "enrich" ? { enriched: 25 } : { imported: 3 }),
   }));
-  const list = palette(50, { refreshRunner: run });
+  const list = palette(50, { cliRunner: run });
   await list.refresh();
   assert.deepEqual(calls, ["sync github", "collect x --fast", "enrich github-readmes --limit 25"]);
-  assert.equal(list.refreshStatus, "✓ GitHub +3 · X +3 · READMEs +25");
+  assert.equal(list.notice, "✓ GitHub +3 · X +3 · READMEs +25");
 });
 
 test("ctrl+r starts a refresh without waiting for it", () => {
   const { run } = fakeRunner(() => ({ ok: true, stdout: "{}" }));
-  const list = palette(50, { refreshRunner: run });
+  const list = palette(50, { cliRunner: run });
   list.handleInput(CTRL_R);
-  assert.match(list.refreshStatus ?? "", /refreshing GitHub/);
+  assert.match(list.notice ?? "", /refreshing GitHub/);
 });
 
 test("a failed step is reported and does not stop the rest", async () => {
   const { calls, run } = fakeRunner((args) =>
     args[0] === "collect" ? { ok: false, stdout: "" } : { ok: true, stdout: JSON.stringify({ imported: 1, enriched: 1 }) },
   );
-  const list = palette(9, { refreshRunner: run });
+  const list = palette(9, { cliRunner: run });
   await list.refresh();
   assert.deepEqual(calls.map((call) => call.split(" ")[0]), ["sync", "collect", "enrich"]);
-  assert.equal(list.refreshStatus, "⚠ GitHub +1 · X failed · READMEs +1");
+  assert.equal(list.notice, "⚠ GitHub +1 · X failed · READMEs +1");
 });
 
 test("a step reporting no change reads as such", async () => {
   const { run } = fakeRunner(() => ({ ok: true, stdout: JSON.stringify({ imported: 0, enriched: 0 }) }));
-  const list = palette(50, { refreshRunner: run });
+  const list = palette(50, { cliRunner: run });
   await list.refresh();
-  assert.equal(list.refreshStatus, "✓ GitHub no change · X no change · READMEs no change");
+  assert.equal(list.notice, "✓ GitHub no change · X no change · READMEs no change");
 });
 
 test("? opens help only while the search box is empty", () => {
@@ -212,6 +214,40 @@ test("enter still inserts from the reading pane", () => {
   list.handleInput(CTRL_E);
   list.handleInput("\r");
   assert.deepEqual(list.actions, [{ action: "insert", id: 1 }]);
+});
+
+test("ctrl+n writes a note through the CLI, and esc cancels without writing", async () => {
+  const { calls, run } = fakeRunner(() => ({ ok: true, stdout: "{}" }));
+  const list = paletteOf(["Bookmark one"], { cliRunner: run });
+
+  list.handleInput(CTRL_N);
+  assert.equal(list.noteEdit?.id, 1);
+  for (const character of "why it matters") list.handleInput(character);
+  assert.equal(list.noteEdit?.input.getValue(), "why it matters");
+
+  // esc must abandon the edit without writing and without closing the palette.
+  list.handleInput(ESCAPE);
+  assert.equal(list.noteEdit, null);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(list.actions, []);
+
+  list.handleInput(CTRL_N);
+  for (const character of "why it matters") list.handleInput(character);
+  list.handleInput("\r");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ["note 1 why it matters"]);
+  assert.equal(list.notice, "✎ note saved");
+});
+
+test("a failed note write is reported and the note is rolled back", async () => {
+  const { run } = fakeRunner(() => ({ ok: false, stdout: "" }));
+  const list = paletteOf(["Bookmark one"], { cliRunner: run });
+  list.handleInput(CTRL_N);
+  for (const character of "temporary") list.handleInput(character);
+  list.handleInput("\r");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.equal(list.notice, "✎ note not saved");
+  assert.equal(list.filtered[0]?.title, "Bookmark one");
 });
 
 test("f1 opens help and any key returns to the list", () => {
