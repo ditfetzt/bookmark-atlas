@@ -11,7 +11,6 @@ test("MCP initializes and lists read-only Bookmark Atlas tools", () => {
   const result = listed?.result as { tools: Array<{ name: string }> };
   assert.deepEqual(result.tools.map((tool) => tool.name), [
     "search_bookmarks",
-    "recent_bookmarks",
     "get_bookmark",
     "suggest_for_task",
     "related_bookmarks",

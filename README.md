@@ -83,7 +83,6 @@ Tools:
 | --- | --- |
 | `search_bookmarks` | Keyword search across titles, descriptions, topics, and captured content |
 | `suggest_for_task` | Rank saved bookmarks against a task and the current project's dependencies |
-| `recent_bookmarks` | Most recently saved sources |
 | `get_bookmark` | One source's metadata, optionally with captured content |
 | `related_bookmarks` | Saved sources related to one source, ranked by shared rare topics and shared distinctive terms, each with its reasons |
 
