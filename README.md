@@ -109,7 +109,7 @@ Instead of describing the stage by hand, derive it from git (branch, recent comm
 node src/cli.ts recall --stage "multi-tenant sync" --repo . --limit 8
 ```
 
-In pi, `/consult [focus]` does the same and opens the palette pre-ranked, each row showing *why* it matched. An explicit focus leads; the git stage adds context. With no focus at all, the stage itself is the query. This is the on-demand alternative to auto-recall — nothing is injected into your prompt unless you ask.
+In pi, `/consult [focus]` does the same and opens the palette pre-ranked, each row showing *why* it matched. An explicit focus leads; the git stage adds context. With no focus at all, the stage itself is the query. Nothing is injected into your prompt unless you ask.
 
 ### Notes — context you write yourself
 
@@ -121,10 +121,7 @@ node src/cli.ts note 406 "Closest blueprint: hybrid BM25+vector with RRF and a c
 
 Notes are searchable, returned by `get` and `recall`, and shown in the pi palette. They are the one thing recall cannot infer, so they are the strongest relevance signal you can give it.
 
-In pi:
-
-- `/recall <task>` inserts the top hits as a context block into the editor.
-- `/recall-auto` toggles automatic recall on question-like prompts. Off by default; also settable with `BOOKMARK_ATLAS_AUTO_RECALL=1`.
+Notes are written with the CLI (`note`); the pi extension stays read-only, so there is nothing to configure there.
 
 ### Semantic search — experimental, off by default
 
@@ -172,7 +169,7 @@ The filter row shows a live count per source plus how many bookmarks you have ne
 
 Inserting or opening a bookmark records usage: it ranks higher in later consults and leaves the `unseen` set.
 
-Also registered: `/consult [focus]`, `/recall <task>`, `/recall-auto`, and `/bookmark-note <id> <text>` (see [Recall](#recall--bookmarks-as-context-for-the-agent)).
+The extension registers exactly two commands: `/bookmarks` and `/consult [focus]` (see [Recall](#recall--bookmarks-as-context-for-the-agent)).
 
 Enable it with either:
 
@@ -194,4 +191,3 @@ BOOKMARK_ATLAS_DB="$PWD/data/bookmarks.db" pi
 | `BOOKMARK_ATLAS_TWEETXVAULT_BIN` | TweetXVault executable (default `tweetxvault`) |
 | `BOOKMARK_ATLAS_TWEETXVAULT_DIR` | TweetXVault data dir, used to resolve media paths (default `~/Library/Application Support/tweetxvault`) |
 | `BOOKMARK_ATLAS_X_CAPTURE_TOKEN` | Required token for `capture x` |
-| `BOOKMARK_ATLAS_AUTO_RECALL` | `1` enables automatic recall in the pi extension |
