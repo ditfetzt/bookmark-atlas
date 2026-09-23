@@ -153,10 +153,6 @@ export function embedQuery(db: AtlasDatabase, text: string): number[] | null {
   return vector;
 }
 
-export function embeddedChunkCount(db: AtlasDatabase): number {
-  return (db.prepare("SELECT COUNT(*) AS c FROM chunk_embeddings").get() as { c: number }).c;
-}
-
 export type VectorHit = { resourceId: number; score: number };
 
 /** Resource ids ranked by cosine similarity to a query vector, best chunk per resource. */
