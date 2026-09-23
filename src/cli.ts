@@ -2,7 +2,7 @@
 import { databasePath, openDatabase, pruneOrphanResources, refreshResourceFts } from "./db.ts";
 import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
-import { recall } from "./recall.ts";
+import { recall, relatedResources } from "./recall.ts";
 import { buildEmbeddings, embedQuery, embeddingsAvailable } from "./embeddings.ts";
 import { collectStage } from "./stage.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
@@ -53,6 +53,7 @@ Usage:
   bookmark-atlas capture x [--port N]
   bookmark-atlas search <query> [--limit N]
   bookmark-atlas recall <task> [--repo PATH] [--limit N] [--semantic] [--stage]
+  bookmark-atlas related <resource-id> [--limit N]
   bookmark-atlas embed [--limit N]
   bookmark-atlas get <resource-id> [--content]
   bookmark-atlas note <resource-id> <text...> [--clear]
@@ -164,6 +165,14 @@ async function main(): Promise<void> {
           2,
         ),
       );
+      return;
+    }
+
+    if (command === "related") {
+      const id = Number.parseInt(args[1] ?? "", 10);
+      if (!Number.isFinite(id) || id < 1) throw new Error("related requires a numeric resource id");
+      const limit = Number.parseInt(optionValue(args, "--limit") ?? "10", 10);
+      console.log(JSON.stringify(relatedResources(db, id, { limit }), null, 2));
       return;
     }
 

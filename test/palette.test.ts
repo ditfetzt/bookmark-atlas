@@ -24,6 +24,8 @@ type Harness = {
   topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null;
   sortMode: string;
   filtered: Array<{ id: number; title: string }>;
+  items: Array<{ id: number; title: string }>;
+  reasons: Map<number, string[]>;
   input: { getValue(): string; setValue(value: string): void };
   /** Every action the palette reported through its done callback. */
   actions: unknown[];
@@ -86,6 +88,7 @@ const CTRL_A = "\x01";
 const CTRL_D = "\x04";
 const CTRL_T = "\x14";
 const CTRL_S = "\x13";
+const CTRL_L = "\x0c";
 const F1 = "\x1bOP";
 const ESCAPE = "\x1b";
 
@@ -383,6 +386,26 @@ test("oldest and newest fall back to the row's own date when it has no save date
   ]);
   list.handleInput(CTRL_S);
   assert.deepEqual(list.filtered.map((bookmark) => bookmark.title), ["saved-early", "saved-late"]);
+});
+
+test("ctrl+l pivots the list to related bookmarks and back", async () => {
+  const { calls, run } = fakeRunner((args) => ({
+    ok: true,
+    stdout: JSON.stringify(args[0] === "related" ? [{ id: 2, whyRelated: ["topic:mlx"] }] : {}),
+  }));
+  const list = paletteOf(["one", "two", "three"], { cliRunner: run });
+  assert.equal(list.items.length, 3);
+
+  list.handleInput(CTRL_L);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(calls, ["related 1 --limit 40"]);
+  assert.deepEqual(list.items.map((item) => item.id), [2]);
+  assert.deepEqual(list.reasons.get(2), ["topic:mlx"]);
+
+  // Pressing it again puts the whole library back.
+  list.handleInput(CTRL_L);
+  assert.equal(list.items.length, 3);
+  assert.equal(list.reasons.size, 0);
 });
 
 test("f1 opens help and any key returns to the list", () => {

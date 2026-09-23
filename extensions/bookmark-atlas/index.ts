@@ -336,6 +336,8 @@ export class BookmarkPalette implements Component, Focusable {
 	private topic: string | null = null;
 	private topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null = null;
 	private reading = false;
+	/** The full library, held while the list is pivoted to a bookmark's relations. */
+	private relatedBase: Bookmark[] | null = null;
 	private noteEdit: { id: number; input: Input } | null = null;
 	private preview: { id: number; offset: number } | null = null;
 	/** Recorded by render so input handling can clamp the scroll without re-wrapping. */
@@ -527,6 +529,64 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		this.images.set(bookmark.id, image);
 		return image;
+	}
+
+	/**
+	 * Pivot the list to what is related to the selected bookmark, and back again.
+	 * The ranking lives in the CLI, so this shells out the same way consult does and
+	 * reuses the reasons mechanism to say why each one matched.
+	 */
+	private async toggleRelated(): Promise<void> {
+		if (this.relatedBase) {
+			this.items = this.relatedBase;
+			this.relatedBase = null;
+			this.reasons.clear();
+			this.notice = null;
+			this.refilter();
+			this.requestRender?.();
+			return;
+		}
+		const bookmark = this.selectedBookmark();
+		if (!bookmark) return;
+		const base = this.items;
+		this.notice = "↳ finding related…";
+		this.requestRender?.();
+		const result = await this.cliRunner(["related", String(bookmark.id), "--limit", "40"]);
+		if (!result.ok) {
+			this.notice = "↳ related lookup failed";
+			this.requestRender?.();
+			return;
+		}
+		let hits: Array<{ id: number; whyRelated?: string[] }>;
+		try {
+			hits = JSON.parse(result.stdout) as Array<{ id: number; whyRelated?: string[] }>;
+		} catch {
+			this.notice = "↳ related lookup returned invalid data";
+			this.requestRender?.();
+			return;
+		}
+		const byId = new Map(base.map((item) => [item.id, item]));
+		const items = hits.flatMap((hit) => {
+			const item = byId.get(hit.id);
+			return item ? [item] : [];
+		});
+		if (items.length === 0) {
+			this.notice = "↳ nothing related found";
+			this.requestRender?.();
+			return;
+		}
+		this.relatedBase = base;
+		this.items = items;
+		this.reasons.clear();
+		for (const hit of hits) {
+			const item = byId.get(hit.id);
+			if (item && hit.whyRelated) this.reasons.set(hit.id, hit.whyRelated);
+		}
+		// Relation order is the point, so stop any other sort from rearranging it.
+		this.sortMode = "relevance";
+		this.refilter();
+		this.notice = `↳ related to ${bookmark.title.slice(0, 28)}`;
+		this.requestRender?.();
 	}
 
 	/** Run the refresh steps in order, non-blocking, then reload the list in place. */
@@ -756,6 +816,10 @@ export class BookmarkPalette implements Component, Focusable {
 			this.openTopicPicker();
 			return;
 		}
+		if (matchesKey(data, "ctrl+l")) {
+			void this.toggleRelated();
+			return;
+		}
 		// Jump navigation. macOS sends Fn+←/→ as home/end and Fn+↑/↓ as pageUp/pageDown;
 		// Cmd+↑/↓ arrives as super+up/down only when the terminal forwards the modifier.
 		if (matchesKey(data, "home")) {
@@ -885,6 +949,7 @@ export class BookmarkPalette implements Component, Focusable {
 			key("ctrl+a", "hide archived repositories"),
 			key("ctrl+d", "only what was added in the last 7 days"),
 			key("ctrl+t", "filter by topic"),
+			key("ctrl+l", "pivot the list to what is related to this bookmark"),
 			key("ctrl+s", "sort: newest, oldest, stars, A-Z (best match appears once you search)"),
 			"",
 			theme.fg("accent", "Act"),
@@ -924,12 +989,14 @@ export class BookmarkPalette implements Component, Focusable {
 		lines.push(theme.fg("border", `┌${"─".repeat(width - 2)}┐`));
 		lines.push(
 			row(
-				theme.fg("accent", theme.bold(this.ranked ? "Consult" : "Bookmark Atlas")) +
+					theme.fg("accent", theme.bold(this.relatedBase ? "Related" : this.ranked ? "Consult" : "Bookmark Atlas")) +
 					theme.fg(
 						"dim",
-						this.ranked
-							? `  ${this.items.length} matches  ·  ${this.filtered.length} shown`
-							: `  ${this.items.length} bookmarks  ·  ${this.filtered.length} shown`,
+						this.relatedBase
+							? `  ${this.items.length} related  ·  ${this.filtered.length} shown`
+							: this.ranked
+								? `  ${this.items.length} matches  ·  ${this.filtered.length} shown`
+								: `  ${this.items.length} bookmarks  ·  ${this.filtered.length} shown`,
 					),
 			),
 		);
@@ -942,8 +1009,11 @@ export class BookmarkPalette implements Component, Focusable {
 		);
 		const counts = this.sourceCounts();
 		// Without a query (or a consult ranking) there is nothing to be relevant to.
-		const sortLabel =
-			this.sortMode === "relevance" && !this.hasQuery() && !this.ranked ? "newest" : this.sortMode;
+		const sortLabel = this.relatedBase
+			? "by relation"
+			: this.sortMode === "relevance" && !this.hasQuery() && !this.ranked
+				? "newest"
+				: this.sortMode;
 		const chip = (label: string, value: SourceFilter, count: number): string => {
 			const text = ` ${label} ${count} `;
 			return this.sourceFilter === value
@@ -1078,7 +1148,7 @@ export class BookmarkPalette implements Component, Focusable {
 					? "  enter save note · esc cancel"
 					: reading
 						? "  ↑↓ scroll · enter insert · esc back · ? help"
-						: "  ↑↓ navigate · enter insert · ctrl+e read · ctrl+n note · esc close",
+						: "  ↑↓ move · enter insert · ctrl+e read · ctrl+n note · ctrl+l related · esc close",
 			),
 		);
 		return lines;
