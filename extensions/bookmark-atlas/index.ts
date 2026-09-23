@@ -78,6 +78,7 @@ const LIST_SQL = `
   SELECT
     r.id, r.title, r.canonical_url AS url, r.author, r.description,
     r.resource_type AS type,
+    r.created_at AS createdAt,
     (SELECT MAX(s.saved_at) FROM saves s WHERE s.resource_id = r.id AND s.unsaved_at IS NULL) AS savedAt,
     (SELECT COUNT(*) FROM x_media m WHERE m.resource_id = r.id AND m.type = 'photo') AS photos,
     (SELECT COUNT(*) FROM x_media m WHERE m.resource_id = r.id AND m.type = 'video') AS videos,
@@ -99,6 +100,7 @@ type Bookmark = {
 	author: string | null;
 	description: string | null;
 	type: string;
+	createdAt: string | null;
 	savedAt: string | null;
 	photos: number;
 	videos: number;
@@ -114,6 +116,21 @@ type SourceFilter = "all" | "github" | "x";
 
 function sourceOf(bookmark: Bookmark): "github" | "x" {
 	return bookmark.type === "x_post" ? "x" : "github";
+}
+
+/**
+ * When a bookmark was saved. X bookmarks have no save date from TweetXVault, so
+ * they fall back to when this database first saw them — the same fallback the
+ * base ordering uses, which keeps the date sorts and the base order agreeing.
+ */
+function savedOn(bookmark: Bookmark): string {
+	return bookmark.savedAt ?? bookmark.createdAt ?? "";
+}
+
+/** Compact star count for the list column, e.g. 12345 -> "★ 12.3k". */
+function formatStars(stars: number | null): string {
+	if (stars === null || stars === undefined) return "★ —";
+	return stars >= 1000 ? `★ ${(stars / 1000).toFixed(1)}k` : `★ ${stars}`;
 }
 
 /** Topics are stored as a JSON array; never let a malformed value break the list. */
@@ -427,13 +444,17 @@ export class BookmarkPalette implements Component, Focusable {
 		]);
 	}
 
+	private hasQuery(): boolean {
+		return this.input.getValue().trim() !== "";
+	}
+
 	private sortBookmarks(items: Bookmark[]): Bookmark[] {
 		const sorted = [...items];
 		switch (this.sortMode) {
 			case "newest":
-				return sorted.sort((a, b) => (b.savedAt ?? "").localeCompare(a.savedAt ?? ""));
+				return sorted.sort((a, b) => savedOn(b).localeCompare(savedOn(a)));
 			case "oldest":
-				return sorted.sort((a, b) => (a.savedAt ?? "").localeCompare(b.savedAt ?? ""));
+				return sorted.sort((a, b) => savedOn(a).localeCompare(savedOn(b)));
 			case "stars":
 				return sorted.sort((a, b) => (b.stars ?? -1) - (a.stars ?? -1));
 			case "alpha":
@@ -449,9 +470,15 @@ export class BookmarkPalette implements Component, Focusable {
 	}
 
 	private cycleSort(): void {
-		const order: SortMode[] = ["relevance", "newest", "oldest", "stars", "alpha"];
-		const index = order.indexOf(this.sortMode);
-		this.sortMode = order[(index + 1) % order.length] ?? "relevance";
+		// "relevance" only means something once there is a query. Without one it is
+		// the base ordering, which is newest-first — so it is not offered, and
+		// starting from it steps to oldest rather than to an identical view.
+		const order: SortMode[] = this.hasQuery()
+			? ["relevance", "newest", "oldest", "stars", "alpha"]
+			: ["newest", "oldest", "stars", "alpha"];
+		const current = this.sortMode === "relevance" && !this.hasQuery() ? "newest" : this.sortMode;
+		const index = order.indexOf(current);
+		this.sortMode = order[(index + 1) % order.length] ?? order[0] ?? "newest";
 		this.filtered = this.applyFilter(this.input.getValue());
 		this.selected = 0;
 	}
@@ -872,7 +899,7 @@ export class BookmarkPalette implements Component, Focusable {
 			key("ctrl+a", "hide archived repositories"),
 			key("ctrl+d", "only what was added in the last 7 days"),
 			key("ctrl+t", "filter by topic"),
-			key("ctrl+s", "sort: relevance, newest, oldest, stars, A-Z"),
+			key("ctrl+s", "sort: newest, oldest, stars, A-Z (best match appears once you search)"),
 			"",
 			theme.fg("accent", "Act"),
 			key("enter", "insert title, url and content into the editor"),
@@ -931,9 +958,7 @@ export class BookmarkPalette implements Component, Focusable {
 		const unseenCount = this.items.filter((bookmark) => bookmark.useCount === 0).length;
 		// Without a query (or a consult ranking) there is nothing to be relevant to.
 		const sortLabel =
-			this.sortMode === "relevance" && this.input.getValue().trim() === "" && !this.ranked
-				? "default"
-				: this.sortMode;
+			this.sortMode === "relevance" && !this.hasQuery() && !this.ranked ? "newest" : this.sortMode;
 		const chip = (label: string, value: SourceFilter, count: number): string => {
 			const text = ` ${label} ${count} `;
 			return this.sourceFilter === value
@@ -963,6 +988,8 @@ export class BookmarkPalette implements Component, Focusable {
 		const start = Math.max(0, Math.min(this.selected - Math.floor(LIST_ROWS / 2), maxStart));
 		// Numbers are absolute positions in the current view, so they stay stable while scrolling.
 		const ordinalWidth = Math.max(2, String(this.filtered.length).length);
+		// Swap the date column for the star count while sorting by it, so the order is legible.
+		const showStars = this.sortMode === "stars";
 		for (let offset = 0; offset < listRows; offset += 1) {
 			const index = start + offset;
 			const bookmark = this.filtered[index];
@@ -974,7 +1001,8 @@ export class BookmarkPalette implements Component, Focusable {
 			}
 			const marker = index === this.selected ? theme.fg("accent", "▸") : " ";
 			const ordinal = String(index + 1).padStart(ordinalWidth);
-			const date = (bookmark.savedAt ?? "").slice(0, 10) || "----------";
+			const date = savedOn(bookmark).slice(0, 10) || "----------";
+			const leading = showStars ? formatStars(bookmark.stars).padEnd(10) : date;
 			const author = truncateToWidth((bookmark.author ?? "").replace(/^@/, ""), 14, "…");
 			const badge =
 				bookmark.photos || bookmark.videos
@@ -988,7 +1016,7 @@ export class BookmarkPalette implements Component, Focusable {
 				Math.max(10, innerWidth - 44 - ordinalWidth),
 				"…",
 			);
-			const text = `${marker} ${ordinal}  ${date}  ${author.padEnd(14)}  ${title}${badge}`;
+			const text = `${marker} ${ordinal}  ${leading}  ${author.padEnd(14)}  ${title}${badge}`;
 			lines.push(
 				row(
 					index === this.selected

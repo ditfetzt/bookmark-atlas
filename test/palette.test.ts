@@ -22,6 +22,7 @@ type Harness = {
   preview: { id: number; offset: number } | null;
   topic: string | null;
   topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null;
+  sortMode: string;
   filtered: Array<{ id: number; title: string }>;
   input: { getValue(): string; setValue(value: string): void };
   /** Every action the palette reported through its done callback. */
@@ -34,6 +35,7 @@ type ItemSeed = {
   topics?: string[];
   savedAt?: string;
   useCount?: number;
+  stars?: number;
 };
 
 /** The palette hides its state; the test only needs the observable cursor and status. */
@@ -46,6 +48,7 @@ function paletteItems(seeds: ItemSeed[], options: Record<string, unknown> = {}):
     savedAt: seed.savedAt ?? "2024-01-01",
     useCount: seed.useCount ?? 0,
     archived: seed.archived ?? 0,
+    stars: seed.stars ?? null,
     topics: JSON.stringify(seed.topics ?? []),
   }));
   const actions: unknown[] = [];
@@ -84,6 +87,7 @@ const CTRL_N = "\x0e";
 const CTRL_A = "\x01";
 const CTRL_D = "\x04";
 const CTRL_T = "\x14";
+const CTRL_S = "\x13";
 const F1 = "\x1bOP";
 const ESCAPE = "\x1b";
 
@@ -319,6 +323,56 @@ test("abandoning the topic picker leaves the filter alone", () => {
   assert.equal(list.topic, null);
   assert.equal(list.filtered.length, 1);
   assert.deepEqual(list.actions, []);
+});
+
+test("the sort cycle never steps onto a view identical to the current one", () => {
+  const list = paletteItems([{ title: "a" }, { title: "b" }]);
+  // No query: the base order is newest-first, so it is labelled newest and the
+  // first step must go to oldest rather than to a duplicate of where we started.
+  assert.equal(list.sortMode, "relevance");
+  list.handleInput(CTRL_S);
+  assert.equal(list.sortMode, "oldest");
+  list.handleInput(CTRL_S);
+  assert.equal(list.sortMode, "stars");
+  list.handleInput(CTRL_S);
+  assert.equal(list.sortMode, "alpha");
+  list.handleInput(CTRL_S);
+  assert.equal(list.sortMode, "newest");
+  list.handleInput(CTRL_S);
+  assert.equal(list.sortMode, "oldest");
+});
+
+test("with a query the sort cycle offers relevance as well", () => {
+  const list = paletteItems([{ title: "alpha one" }]);
+  typeQuery(list, "alpha");
+  list.handleInput(CTRL_S);
+  assert.equal(list.sortMode, "newest");
+  for (let step = 0; step < 4; step += 1) list.handleInput(CTRL_S);
+  assert.equal(list.sortMode, "relevance");
+});
+
+test("sorting by stars puts unstarred bookmarks last", () => {
+  const list = paletteItems([
+    { title: "few", stars: 3 },
+    { title: "none" },
+    { title: "many", stars: 900 },
+  ]);
+  list.handleInput(CTRL_S); // oldest
+  list.handleInput(CTRL_S); // stars
+  assert.equal(list.sortMode, "stars");
+  assert.deepEqual(
+    list.filtered.map((bookmark) => bookmark.title),
+    ["many", "few", "none"],
+  );
+});
+
+test("oldest and newest fall back to the row's own date when it has no save date", () => {
+  const list = paletteItems([
+    { title: "saved-late", savedAt: "2024-06-01" },
+    { title: "saved-early", savedAt: "2024-01-01" },
+  ]);
+  list.handleInput(CTRL_S);
+  assert.deepEqual(list.filtered.map((bookmark) => bookmark.title), ["saved-early", "saved-late"]);
 });
 
 test("f1 opens help and any key returns to the list", () => {

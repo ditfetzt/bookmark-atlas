@@ -163,11 +163,15 @@ Media files are never copied. `x_media.local_path` points into TweetXVault's med
 /bookmarks local-first agents
 ```
 
-Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+a` hide archived repositories, `ctrl+d` show only the last seven days, `ctrl+t` filter by topic, `ctrl+s` cycle sort (best match → newest → oldest → stars → A–Z), `ctrl+r` fetch new bookmarks in the background, `ctrl+e` read the full text, `ctrl+n` write a note, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
+Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+a` hide archived repositories, `ctrl+d` show only the last seven days, `ctrl+t` filter by topic, `ctrl+s` cycle sort (newest → oldest → stars → A–Z, plus best match once you have typed a query), `ctrl+r` fetch new bookmarks in the background, `ctrl+e` read the full text, `ctrl+n` write a note, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
 
 Each row is numbered by its position in the current view, so the number stays stable while you scroll, filter, or sort.
 
-Typing searches two things at once. A title, author, or description match that is contiguous or word-aligned ranks first; then bookmarks found only inside their captured README, post, or article text, ordered by keyword relevance. `ctrl+s` adds sort modes on top (`default`, `newest`, `oldest`, `stars`, `A–Z`) — without a query there is nothing to be relevant to, so the label says `default`.
+Typing searches two things at once. A title, author, or description match that is contiguous or word-aligned ranks first; then bookmarks found only inside their captured README, post, or article text, ordered by keyword relevance.
+
+`ctrl+s` cycles the sort: `newest`, `oldest`, `stars`, `A–Z`. Sorting by stars swaps the date column for the star count (`★ 390.3k`, `★ 12.3k`). A bookmark with no star count — every X post — reads `★ —` and sorts below all of them, because there is no star count to rank it by. `best match` joins the cycle once you have typed a query; without one there is nothing to be relevant to, so the base order is simply newest-first and is labelled `newest`.
+
+X bookmarks carry no save date from TweetXVault, so the date sorts and the date column fall back to when this database first saw them — the same fallback the base ordering uses, which keeps the two consistent.
 
 `ctrl+e` opens a reading pane: the list and the image give way to the full README, post, or article text, wrapped and scrolled with `↑↓` (a page at a time with `Fn+↑`/`Fn+↓`). `esc` returns to the list without closing the palette. The overlay keeps the same height, so nothing jumps when you toggle it.
 
