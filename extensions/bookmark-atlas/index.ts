@@ -53,6 +53,11 @@ const DB_PATH = process.env.BOOKMARK_ATLAS_DB ?? join(REPO_ROOT, "data", "bookma
 const CLI_PATH = join(REPO_ROOT, "src", "cli.ts");
 // Rows visible in the list; also the jump size for PageUp/PageDown and Cmd+↑/↓.
 const LIST_ROWS = 10;
+const EXCERPT_ROWS = 5;
+const IMAGE_ROWS = 10;
+// The reading pane trades the list, its separator and the image for more text, so
+// the overlay keeps the same height.
+const READING_ROWS = LIST_ROWS + 1 + EXCERPT_ROWS + 1 + IMAGE_ROWS;
 
 type RecallHit = {
 	id: number;
@@ -304,6 +309,10 @@ export class BookmarkPalette implements Component, Focusable {
 	private sourceFilter: SourceFilter = "all";
 	private sortMode: SortMode = "relevance";
 	private unseenOnly = false;
+	private reading = false;
+	private preview: { id: number; offset: number } | null = null;
+	/** Recorded by render so input handling can clamp the scroll without re-wrapping. */
+	private previewTotal = 0;
 	private readonly requestRender: (() => void) | undefined;
 	private readonly refreshRunner: CliRunner;
 	private refreshing = false;
@@ -495,10 +504,41 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 	}
 
+	/** Keys while the reading pane is open: scroll the text, esc returns to the list. */
+	private handleReadingInput(data: string): void {
+		const bookmark = this.selectedBookmark();
+		const current = this.preview && bookmark && this.preview.id === bookmark.id ? this.preview.offset : 0;
+		const maxOffset = Math.max(0, this.previewTotal - READING_ROWS);
+		const scrollTo = (offset: number): void => {
+			if (!bookmark) return;
+			this.preview = { id: bookmark.id, offset: Math.max(0, Math.min(offset, maxOffset)) };
+			this.requestRender?.();
+		};
+		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+e") || matchesKey(data, "ctrl+c")) {
+			this.reading = false;
+			this.requestRender?.();
+			return;
+		}
+		if (matchesKey(data, "up")) return scrollTo(current - 1);
+		if (matchesKey(data, "down")) return scrollTo(current + 1);
+		if (matchesKey(data, "pageUp")) return scrollTo(current - (READING_ROWS - 1));
+		if (matchesKey(data, "pageDown")) return scrollTo(current + (READING_ROWS - 1));
+		if (matchesKey(data, "home")) return scrollTo(0);
+		if (matchesKey(data, "end")) return scrollTo(maxOffset);
+		if (matchesKey(data, "return") && bookmark) {
+			recordUse(bookmark.id, "insert");
+			this.done({ action: "insert", id: bookmark.id });
+		}
+	}
+
 	handleInput(data: string): void {
 		if (this.showHelp) {
 			this.showHelp = false;
 			this.requestRender?.();
+			return;
+		}
+		if (this.reading) {
+			this.handleReadingInput(data);
 			return;
 		}
 		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
@@ -525,6 +565,12 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		if (matchesKey(data, "ctrl+r")) {
 			void this.refresh();
+			return;
+		}
+		if (matchesKey(data, "ctrl+e")) {
+			this.reading = true;
+			this.preview = null;
+			this.requestRender?.();
 			return;
 		}
 		// Jump navigation. macOS sends Fn+←/→ as home/end and Fn+↑/↓ as pageUp/pageDown;
@@ -617,6 +663,7 @@ export class BookmarkPalette implements Component, Focusable {
 			"",
 			theme.fg("accent", "Act"),
 			key("enter", "insert title, url and content into the editor"),
+			key("ctrl+e", "read the full README or post text"),
 			key("ctrl+y", "copy the url"),
 			key("ctrl+o", "open in the browser"),
 			key("ctrl+r", "fetch new bookmarks (GitHub, X, READMEs)"),
@@ -643,10 +690,6 @@ export class BookmarkPalette implements Component, Focusable {
 		};
 		const row = (content: string): string =>
 			theme.fg("border", "│ ") + pad(content) + theme.fg("border", " │");
-
-		// Fixed row budgets keep the overlay the same size as the selection moves.
-		const EXCERPT_ROWS = 5;
-		const IMAGE_ROWS = 10;
 
 		const lines: string[] = [];
 		lines.push(theme.fg("border", `┌${"─".repeat(width - 2)}┐`));
@@ -689,11 +732,13 @@ export class BookmarkPalette implements Component, Focusable {
 		);
 		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
 
+		const reading = this.reading;
+		const listRows = reading ? 0 : LIST_ROWS;
 		const maxStart = Math.max(0, this.filtered.length - LIST_ROWS);
 		const start = Math.max(0, Math.min(this.selected - Math.floor(LIST_ROWS / 2), maxStart));
 		// Numbers are absolute positions in the current view, so they stay stable while scrolling.
 		const ordinalWidth = Math.max(2, String(this.filtered.length).length);
-		for (let offset = 0; offset < LIST_ROWS; offset += 1) {
+		for (let offset = 0; offset < listRows; offset += 1) {
 			const index = start + offset;
 			const bookmark = this.filtered[index];
 			if (!bookmark) {
@@ -727,10 +772,23 @@ export class BookmarkPalette implements Component, Focusable {
 				),
 			);
 		}
-		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
+		if (!reading) lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
 
 		const bookmark = this.selectedBookmark();
 		const detail = bookmark ? this.detail(bookmark) : null;
+		const note = bookmark?.context ? `📝 ${bookmark.context}` : "";
+		const body = (detail?.content ?? bookmark?.description ?? "").replace(/\s+/g, " ").trim();
+		const fullText = [note, body].filter(Boolean).join("  ·  ").slice(0, 20000);
+		const excerptLines = wrap(fullText, innerWidth, 600);
+		// render() owns the wrap, so it records the total for handleReadingInput to clamp against.
+		this.previewTotal = excerptLines.length;
+		const excerptRows = reading ? READING_ROWS : EXCERPT_ROWS;
+		const maxOffset = Math.max(0, excerptLines.length - excerptRows);
+		const offset =
+			reading && this.preview && bookmark && this.preview.id === bookmark.id
+				? Math.min(this.preview.offset, maxOffset)
+				: 0;
+
 		lines.push(
 			row(bookmark ? theme.fg("accent", theme.bold(truncateToWidth(bookmark.title, innerWidth, "…"))) : ""),
 		);
@@ -748,24 +806,37 @@ export class BookmarkPalette implements Component, Focusable {
 		lines.push(row(theme.fg("dim", meta)));
 		const why = bookmark ? (this.reasons.get(bookmark.id) ?? []) : [];
 		lines.push(row(why.length > 0 ? theme.fg("accent", `why: ${why.join(" · ")}`) : ""));
-		lines.push(row(""));
+		lines.push(
+			row(
+				reading
+					? theme.fg(
+							"dim",
+							`${offset + 1}-${Math.min(offset + excerptRows, this.previewTotal)} of ${this.previewTotal} lines · ↑↓ scroll · esc back`,
+						)
+					: theme.fg("dim", excerptLines.length > EXCERPT_ROWS ? "ctrl+e to read the full text" : ""),
+			),
+		);
 
-		const note = bookmark?.context ? `📝 ${bookmark.context}` : "";
-		const body = (detail?.content ?? bookmark?.description ?? "").replace(/\s+/g, " ").trim();
-		const excerptLines = wrap([note, body].filter(Boolean).join("  ·  "), innerWidth, EXCERPT_ROWS);
-		for (let index = 0; index < EXCERPT_ROWS; index += 1) {
-			lines.push(row(theme.fg("text", excerptLines[index] ?? "")));
+		for (let index = 0; index < excerptRows; index += 1) {
+			lines.push(row(theme.fg("text", excerptLines[offset + index] ?? "")));
 		}
-		lines.push(row(""));
 
-		const imageLines = bookmark ? (this.image(bookmark)?.render(innerWidth) ?? []) : [];
-		for (let index = 0; index < IMAGE_ROWS; index += 1) {
-			lines.push(row(imageLines[index] ?? ""));
+		if (!reading) {
+			lines.push(row(""));
+			const imageLines = bookmark ? (this.image(bookmark)?.render(innerWidth) ?? []) : [];
+			for (let index = 0; index < IMAGE_ROWS; index += 1) {
+				lines.push(row(imageLines[index] ?? ""));
+			}
 		}
 
 		lines.push(theme.fg("border", `└${"─".repeat(width - 2)}┘`));
 		lines.push(
-			theme.fg("dim", "  ↑↓ navigate · enter insert · ctrl+y copy · ctrl+o open · esc close"),
+			theme.fg(
+				"dim",
+				reading
+					? "  ↑↓ scroll · enter insert · esc back · ? help"
+					: "  ↑↓ navigate · enter insert · ctrl+e read · ctrl+y copy · ctrl+o open · esc close",
+			),
 		);
 		return lines;
 	}

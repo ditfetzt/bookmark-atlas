@@ -17,8 +17,12 @@ type Harness = {
   selected: number;
   refreshStatus: string | null;
   showHelp: boolean;
+  reading: boolean;
+  preview: { id: number; offset: number } | null;
   filtered: Array<{ id: number; title: string }>;
   input: { getValue(): string; setValue(value: string): void };
+  /** Every action the palette reported through its done callback. */
+  actions: unknown[];
 };
 
 /** The palette hides its state; the test only needs the observable cursor and status. */
@@ -31,7 +35,15 @@ function paletteOf(titles: string[], options: Record<string, unknown> = {}): Har
     savedAt: "2024-01-01",
     useCount: 0,
   }));
-  return new BookmarkPalette(items as never, {} as never, () => {}, options as never) as unknown as Harness;
+  const actions: unknown[] = [];
+  const palette = new BookmarkPalette(
+    items as never,
+    {} as never,
+    (action) => actions.push(action),
+    options as never,
+  ) as unknown as Harness;
+  palette.actions = actions;
+  return palette;
 }
 
 function palette(count = 50, options: Record<string, unknown> = {}): Harness {
@@ -47,7 +59,9 @@ function typeQuery(list: Harness, query: string): void {
 }
 
 const CTRL_R = "\x12";
+const CTRL_E = "\x05";
 const F1 = "\x1bOP";
+const ESCAPE = "\x1b";
 
 /** A stand-in for the CLI that records each call and returns a chosen payload. */
 function fakeRunner(handler: (args: string[]) => { ok: boolean; stdout: string }): {
@@ -167,6 +181,37 @@ test("a query with no real metadata match keeps every candidate", () => {
   const list = paletteOf(["zzz tokenizer zzz", "nothing here"]);
   typeQuery(list, "tknzr");
   assert.equal(list.filtered.length, 1);
+});
+
+test("ctrl+e opens the reading pane and esc returns without closing", () => {
+  const list = paletteOf(["Bookmark one"]);
+  list.handleInput(CTRL_E);
+  assert.equal(list.reading, true);
+
+  // esc leaves the reading pane; it must not cancel the whole palette.
+  list.handleInput(ESCAPE);
+  assert.equal(list.reading, false);
+  assert.deepEqual(list.actions, []);
+
+  list.handleInput(ESCAPE);
+  assert.deepEqual(list.actions, [{ action: "cancel" }]);
+});
+
+test("the reading pane scrolls and stops at the top", () => {
+  const list = paletteOf(["Bookmark one"]);
+  list.handleInput(CTRL_E);
+  list.handleInput("\x1b[A"); // up, with nothing above
+  assert.equal(list.preview?.offset ?? 0, 0);
+  list.handleInput("\x1b[A");
+  list.handleInput("\x1b[A");
+  assert.equal(list.preview?.offset ?? 0, 0);
+});
+
+test("enter still inserts from the reading pane", () => {
+  const list = paletteOf(["Bookmark one"]);
+  list.handleInput(CTRL_E);
+  list.handleInput("\r");
+  assert.deepEqual(list.actions, [{ action: "insert", id: 1 }]);
 });
 
 test("f1 opens help and any key returns to the list", () => {
