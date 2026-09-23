@@ -334,6 +334,39 @@ export function refreshResourceFts(db: AtlasDatabase, resourceId: number): void 
   );
 }
 
+export type PruneResult = { pruned: number };
+
+/**
+ * Delete resources that no longer have an active save. Reconciliation removes a
+ * bookmark by setting saves.unsaved_at and never deletes, so unstarred repos and
+ * unbookmarked posts pile up as rows nothing can see. Everything hanging off the
+ * resource cascades, but `saves` has no ON DELETE CASCADE and the full-text row
+ * is not linked by foreign key at all, so both are cleared explicitly.
+ */
+export function pruneOrphanResources(db: AtlasDatabase, options: { dryRun?: boolean } = {}): PruneResult {
+  const ids = (db.prepare(`
+    SELECT r.id FROM resources r
+    WHERE NOT EXISTS (SELECT 1 FROM saves s WHERE s.resource_id = r.id AND s.unsaved_at IS NULL)
+  `).all() as Array<{ id: number }>).map((row) => row.id);
+  if (options.dryRun || ids.length === 0) return { pruned: ids.length };
+  const deleteFts = db.prepare("DELETE FROM resources_fts WHERE resource_id = ?");
+  const deleteSaves = db.prepare("DELETE FROM saves WHERE resource_id = ?");
+  const deleteResource = db.prepare("DELETE FROM resources WHERE id = ?");
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    for (const id of ids) {
+      deleteFts.run(id);
+      deleteSaves.run(id);
+      deleteResource.run(id);
+    }
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
+  return { pruned: ids.length };
+}
+
 export function databasePath(): string {
   return process.env.BOOKMARK_ATLAS_DB ?? "./data/bookmarks.db";
 }

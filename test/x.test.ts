@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { openDatabase } from "../src/db.ts";
+import { openDatabase, pruneOrphanResources } from "../src/db.ts";
 import { importXJson, repairXPosts } from "../src/x.ts";
 
 const nativeTweet = {
@@ -219,6 +219,24 @@ test("skips malformed entries without discarding valid bookmarks", () => {
 test("rejects unsupported JSON shapes", () => {
   const db = openDatabase(":memory:");
   assert.throws(() => importXJson(db, { tweets: [] }), /Unsupported X bookmark JSON/);
+  db.close();
+});
+
+test("prunes resources whose saves were all removed", () => {
+  const db = openDatabase(":memory:");
+  importXJson(db, { bookmarks: [nativeTweet] });
+  assert.equal(pruneOrphanResources(db, { dryRun: true }).pruned, 0);
+
+  db.prepare("UPDATE saves SET unsaved_at = ?").run("2026-10-01T00:00:00Z");
+  // A dry run reports the damage without doing it.
+  assert.equal(pruneOrphanResources(db, { dryRun: true }).pruned, 1);
+  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM resources").get() as { count: number }).count, 1);
+
+  assert.equal(pruneOrphanResources(db).pruned, 1);
+  // The resource, its save, and its separately-stored full-text row all go.
+  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM resources").get() as { count: number }).count, 0);
+  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM saves").get() as { count: number }).count, 0);
+  assert.equal((db.prepare("SELECT COUNT(*) AS count FROM resources_fts").get() as { count: number }).count, 0);
   db.close();
 });
 

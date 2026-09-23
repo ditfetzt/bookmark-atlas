@@ -42,12 +42,15 @@ node src/cli.ts note 1 "why this matters"    # attach a note (searchable, return
 node src/cli.ts note 1 --clear               # remove the note
 node src/cli.ts embed                        # build on-device embeddings (optional, macOS)
 node src/cli.ts status
+node src/cli.ts prune [--dry-run]         # delete resources with no active save
 
 # Agents
 node src/cli.ts mcp                          # MCP server over stdio
 ```
 
 `sync github` imports metadata only. Run `enrich github-readmes` to fetch the actual README text; it is incremental and honours ETags, so re-running is cheap. `--limit`/`--concurrency` control the batch.
+
+Removing a bookmark is never a delete: reconciliation sets `saves.unsaved_at` so the history survives a re-add. That means unstarred repos and unbookmarked posts accumulate as rows nothing can see. `prune` deletes resources with no active save, along with their captures, chunks, embeddings, media references and full-text row. `--dry-run` reports the count without touching anything.
 
 Two fields are derived from an X post's stored payload rather than copied from the export. An article post is titled with the article's own title, not with its `t.co` link — the link says nothing about what the bookmark holds. And the author comes from `core.user_results.result` when the export's own author fields are missing. Import derives both every time; `enrich x-posts` repairs rows written before those rules existed. It reads the payload already in the database, so it needs no network and no re-export, and it is safe to re-run.
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { databasePath, openDatabase, refreshResourceFts } from "./db.ts";
+import { databasePath, openDatabase, pruneOrphanResources, refreshResourceFts } from "./db.ts";
 import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
 import { recall } from "./recall.ts";
@@ -59,6 +59,7 @@ Usage:
   bookmark-atlas note <resource-id> <text...> [--clear]
   bookmark-atlas use <resource-id> [--open]
   bookmark-atlas status
+  bookmark-atlas prune [--dry-run]
   bookmark-atlas mcp
 
 Environment:
@@ -249,6 +250,11 @@ async function main(): Promise<void> {
         | { context: string }
         | undefined;
       console.log(JSON.stringify({ id, context: row?.context ?? null }, null, 2));
+      return;
+    }
+
+    if (command === "prune") {
+      console.log(JSON.stringify(pruneOrphanResources(db, { dryRun: args.includes("--dry-run") }), null, 2));
       return;
     }
 
