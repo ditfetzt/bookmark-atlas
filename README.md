@@ -157,15 +157,17 @@ Media files are never copied. `x_media.local_path` points into TweetXVault's med
 
 ## pi palette
 
-`extensions/bookmark-atlas/` is a pi extension that adds a `/bookmarks` command: an overlay with fuzzy search, a preview of the post or article text, and inline images.
+`extensions/bookmark-atlas/` is a pi extension that adds a `/bookmarks` command: an overlay that searches titles *and* the captured text of every saved README, post, and article, with a preview of that text and inline images.
 
-```
+```text
 /bookmarks local-first agents
 ```
 
-Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (relevance → newest → oldest → stars → A–Z), `ctrl+r` fetch new bookmarks in the background, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
+Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (best match → newest → oldest → stars → A–Z), `ctrl+r` fetch new bookmarks in the background, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `?` or `F1` show a help screen with every key, `esc` close.
 
 Each row is numbered by its position in the current view, so the number stays stable while you scroll, filter, or sort.
+
+Typing searches two things at once. A title, author, or description match that is contiguous or word-aligned ranks first; then bookmarks found only inside their captured README, post, or article text, ordered by keyword relevance. `ctrl+s` adds sort modes on top (`default`, `newest`, `oldest`, `stars`, `A–Z`) — without a query there is nothing to be relevant to, so the label says `default`.
 
 `ctrl+r` runs `sync github`, `collect x --fast`, and `enrich github-readmes` in the background — the list stays usable and reloads in place when they finish, with a per-source count in the footer. A source that fails (no TweetXVault install, no GitHub token) is reported and does not stop the others.
 

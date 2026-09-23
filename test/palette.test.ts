@@ -17,20 +17,33 @@ type Harness = {
   selected: number;
   refreshStatus: string | null;
   showHelp: boolean;
+  filtered: Array<{ id: number; title: string }>;
   input: { getValue(): string; setValue(value: string): void };
 };
 
 /** The palette hides its state; the test only needs the observable cursor and status. */
-function palette(count = 50, options: Record<string, unknown> = {}): Harness {
-  const items = Array.from({ length: count }, (_, index) => ({
+function paletteOf(titles: string[], options: Record<string, unknown> = {}): Harness {
+  const items = titles.map((title, index) => ({
     id: index + 1,
-    title: `Bookmark ${index + 1}`,
+    title,
     url: `https://example.com/${index + 1}`,
     type: "github_repo",
     savedAt: "2024-01-01",
     useCount: 0,
   }));
   return new BookmarkPalette(items as never, {} as never, () => {}, options as never) as unknown as Harness;
+}
+
+function palette(count = 50, options: Record<string, unknown> = {}): Harness {
+  return paletteOf(
+    Array.from({ length: count }, (_, index) => `Bookmark ${index + 1}`),
+    options,
+  );
+}
+
+function typeQuery(list: Harness, query: string): void {
+  list.input.setValue("");
+  for (const character of query) list.handleInput(character);
 }
 
 const CTRL_R = "\x12";
@@ -138,6 +151,22 @@ test("? opens help only while the search box is empty", () => {
   list.handleInput("?");
   assert.equal(list.showHelp, false);
   assert.equal(list.input.getValue(), "oa?");
+});
+
+test("a word-aligned match outranks a scattered subsequence match", () => {
+  // Both match "abc", but only the first is contiguous, so only it should lead.
+  const list = paletteOf(["a big catalog", "ABC tools"]);
+  typeQuery(list, "abc");
+  assert.deepEqual(
+    list.filtered.map((bookmark) => bookmark.title),
+    ["ABC tools", "a big catalog"],
+  );
+});
+
+test("a query with no real metadata match keeps every candidate", () => {
+  const list = paletteOf(["zzz tokenizer zzz", "nothing here"]);
+  typeQuery(list, "tknzr");
+  assert.equal(list.filtered.length, 1);
 });
 
 test("f1 opens help and any key returns to the list", () => {

@@ -3,7 +3,8 @@
  *
  * Usage: /bookmarks [query]
  *
- * Opens an overlay modeled on pi-skill-palette: type to fuzzy-filter, arrows to
+ * Opens an overlay modeled on pi-skill-palette: type to search titles and the
+ * captured text of every saved README, post, and article; arrows to
  * navigate, preview shows post/article text and inline images.
  *   enter    insert the bookmark (title, url, content) into the editor
  *   ctrl+y   copy the url
@@ -19,7 +20,7 @@ import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@earendil-wor
 import {
 	Image,
 	Input,
-	fuzzyFilter,
+	fuzzyMatch,
 	getNativeClipboard,
 	matchesKey,
 	truncateToWidth,
@@ -156,6 +157,48 @@ function loadBookmarks(): Bookmark[] {
 	} finally {
 		db.close();
 	}
+}
+
+// Content search: the palette filter is fuzzy over metadata, this adds the
+// captured text so a query can match a README, post, or article body. Same
+// tokenising rules as src/search.ts, which the extension cannot import because
+// it is symlinked into pi's extensions directory.
+const SEARCH_STOP_WORDS = new Set([
+	"a", "an", "and", "for", "from", "in", "into", "of", "on", "or", "over", "the", "to", "with",
+	"is", "are", "was", "be", "been", "being", "it", "its", "this", "that", "these", "those",
+	"i", "me", "my", "we", "our", "you", "your", "do", "does", "did", "can", "could",
+	"should", "would", "will", "how", "what", "when", "where", "why", "there", "here", "any", "some",
+	"ok", "okay", "nice", "cool", "thanks", "please", "just", "really", "maybe", "sure",
+]);
+
+let searchConnection: DatabaseSync | null = null;
+let contentCache: { query: string; ids: number[] } | null = null;
+
+/** Resource ids whose captured text matches the query, best first. */
+function contentMatchIds(query: string): number[] {
+	if (contentCache?.query === query) return contentCache.ids;
+	const tokens = (query.normalize("NFKC").match(/[\p{L}\p{N}]+/gu) ?? []).filter(
+		(token) => token.length > 1 && !SEARCH_STOP_WORDS.has(token.toLocaleLowerCase()),
+	);
+	if (tokens.length === 0 || !existsSync(DB_PATH)) return [];
+	const ftsQuery = tokens.map((token) => `"${token.replaceAll('"', '""')}"`).join(" OR ");
+	let ids: number[] = [];
+	try {
+		searchConnection ??= new DatabaseSync(DB_PATH, { readOnly: true });
+		const rows = searchConnection
+			.prepare(`
+        SELECT resource_id AS id FROM resources_fts
+        WHERE resources_fts MATCH ?
+        ORDER BY bm25(resources_fts, 0.0, 10.0, 5.0, 3.0, 1.0, 2.0)
+        LIMIT 200
+      `)
+			.all(ftsQuery) as Array<{ id: number }>;
+		ids = rows.map((row) => row.id);
+	} catch {
+		ids = [];
+	}
+	contentCache = { query, ids };
+	return ids;
 }
 
 function loadDetail(id: number): BookmarkDetail | null {
@@ -300,12 +343,42 @@ export class BookmarkPalette implements Component, Focusable {
 				? this.items
 				: this.items.filter((bookmark) => sourceOf(bookmark) === this.sourceFilter);
 		if (this.unseenOnly) scoped = scoped.filter((bookmark) => bookmark.useCount === 0);
-		const base = query.trim()
-			? fuzzyFilter(scoped, query, (bookmark) =>
-					`${bookmark.title} ${bookmark.author ?? ""} ${bookmark.description ?? ""} ${bookmark.url}`,
-				)
-			: [...scoped];
-		return this.sortBookmarks(base);
+		const trimmed = query.trim();
+		if (!trimmed) return this.sortBookmarks([...scoped]);
+		// fuzzyMatch accepts any in-order subsequence, which matches nearly anything
+		// in a long title+url. A negative score means the match is contiguous or
+		// word-aligned; only those may outrank a match found in the content.
+		const tokens = trimmed.split(/[\s/]+/).filter(Boolean);
+		const strong: Array<{ bookmark: Bookmark; score: number }> = [];
+		const weak: Array<{ bookmark: Bookmark; score: number }> = [];
+		for (const bookmark of scoped) {
+			const text = `${bookmark.title} ${bookmark.author ?? ""} ${bookmark.description ?? ""} ${bookmark.url}`;
+			let score = 0;
+			let matchesAll = true;
+			for (const token of tokens) {
+				const match = fuzzyMatch(token, text);
+				if (!match.matches) {
+					matchesAll = false;
+					break;
+				}
+				score += match.score;
+			}
+			if (matchesAll) (score < 0 ? strong : weak).push({ bookmark, score });
+		}
+		strong.sort((a, b) => a.score - b.score);
+		weak.sort((a, b) => a.score - b.score);
+		const matched = new Set([...strong, ...weak].map((entry) => entry.bookmark.id));
+		const scopedById = new Map(scoped.map((bookmark) => [bookmark.id, bookmark]));
+		const byContent: Bookmark[] = [];
+		for (const id of contentMatchIds(trimmed)) {
+			const bookmark = scopedById.get(id);
+			if (bookmark && !matched.has(id)) byContent.push(bookmark);
+		}
+		return this.sortBookmarks([
+			...strong.map((entry) => entry.bookmark),
+			...byContent,
+			...weak.map((entry) => entry.bookmark),
+		]);
 	}
 
 	private sortBookmarks(items: Bookmark[]): Bookmark[] {
@@ -411,6 +484,7 @@ export class BookmarkPalette implements Component, Focusable {
 			}
 		} finally {
 			this.refreshing = false;
+			contentCache = null;
 			this.items = loadBookmarks();
 			this.details.clear();
 			this.images.clear();
@@ -528,7 +602,7 @@ export class BookmarkPalette implements Component, Focusable {
 			theme.fg("accent", theme.bold("Bookmark Atlas")),
 			theme.fg("dim", "  Starred GitHub repos and saved X posts, read from a local database."),
 			"",
-			theme.fg("dim", "  Type to filter, arrow keys to move, enter to insert."),
+			theme.fg("dim", "  Type to search titles and captured text, arrows to move, enter to insert."),
 			"",
 			theme.fg("accent", "Navigate"),
 			key("↑ / ↓", "one row"),
@@ -590,6 +664,11 @@ export class BookmarkPalette implements Component, Focusable {
 		lines.push(row(this.input.render(innerWidth)[0] ?? ""));
 		const counts = this.sourceCounts();
 		const unseenCount = this.items.filter((bookmark) => bookmark.useCount === 0).length;
+		// Without a query (or a consult ranking) there is nothing to be relevant to.
+		const sortLabel =
+			this.sortMode === "relevance" && this.input.getValue().trim() === "" && !this.ranked
+				? "default"
+				: this.sortMode;
 		const chip = (label: string, value: SourceFilter, count: number): string => {
 			const text = ` ${label} ${count} `;
 			return this.sourceFilter === value
@@ -604,7 +683,7 @@ export class BookmarkPalette implements Component, Focusable {
 					chip("GitHub", "github", counts.github) +
 					chip("X", "x", counts.x) +
 					toggle(`unseen ${unseenCount}`, this.unseenOnly) +
-					theme.fg("dim", ` sort:${this.sortMode} `) +
+					theme.fg("dim", ` sort:${sortLabel} `) +
 					theme.fg("dim", this.refreshStatus ?? "tab/ctrl+u/ctrl+s/ctrl+r · ? help"),
 			),
 		);
