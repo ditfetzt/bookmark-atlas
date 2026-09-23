@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { openDatabase } from "../src/db.ts";
-import { importXJson, retitleXArticles } from "../src/x.ts";
+import { importXJson, repairXPosts } from "../src/x.ts";
 
 const nativeTweet = {
   rest_id: "1234567890",
@@ -267,7 +267,7 @@ test("retitles article bookmarks written before the rule existed", () => {
   // Reproduce what the old rule wrote, then repair it out of the stored payload.
   db.prepare("UPDATE resources SET title = 'X post: https://t.co/link'").run();
 
-  assert.deepEqual(retitleXArticles(db), { scanned: 1, retitled: 1 });
+  assert.deepEqual(repairXPosts(db), { scanned: 1, retitled: 1, authored: 0 });
   assert.equal(
     (db.prepare("SELECT title FROM resources").get() as { title: string }).title,
     "Pipeline deep dive",
@@ -280,13 +280,49 @@ test("retitles article bookmarks written before the rule existed", () => {
   db.close();
 });
 
-test("leaves posts without an article alone", () => {
+test("leaves a post that is already correct alone", () => {
   const db = openDatabase(":memory:");
   importXJson(db, { bookmarks: [nativeTweet] });
-  assert.deepEqual(retitleXArticles(db), { scanned: 0, retitled: 0 });
+  assert.deepEqual(repairXPosts(db), { scanned: 1, retitled: 0, authored: 0 });
   assert.match(
     (db.prepare("SELECT title FROM resources").get() as { title: string }).title,
     /local-first agent memory/,
   );
+  db.close();
+});
+
+const exportWithoutAuthor = {
+  tweet_id: "93",
+  text: "A post worth keeping",
+  created_at: "2026-08-01T00:00:00Z",
+  added_at: "2026-09-01T00:00:00Z",
+  raw_json: JSON.stringify({
+    core: { user_results: { result: { core: { screen_name: "damonchen", name: "Damon Chen" } } } },
+  }),
+};
+
+test("reads an author the export left out of its own fields", () => {
+  const db = openDatabase(":memory:");
+  importXJson(db, [exportWithoutAuthor], { tweetxvaultDir: "/tmp/tv" });
+  assert.equal(
+    (db.prepare("SELECT author FROM resources").get() as { author: string }).author,
+    "damonchen",
+  );
+  db.close();
+});
+
+test("backfills an author that was missed at import", () => {
+  const db = openDatabase(":memory:");
+  importXJson(db, [exportWithoutAuthor], { tweetxvaultDir: "/tmp/tv" });
+  // Reproduce what the old normalizer wrote, then repair it from the payload.
+  db.prepare("UPDATE resources SET author = NULL").run();
+
+  assert.deepEqual(repairXPosts(db), { scanned: 1, retitled: 0, authored: 1 });
+  assert.equal(
+    (db.prepare("SELECT author FROM resources").get() as { author: string }).author,
+    "damonchen",
+  );
+  // Idempotent: a second pass has nothing left to do.
+  assert.deepEqual(repairXPosts(db), { scanned: 1, retitled: 0, authored: 0 });
   db.close();
 });

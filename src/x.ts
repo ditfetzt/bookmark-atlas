@@ -149,6 +149,22 @@ function normalizeLinks(value: unknown): NormalizedLink[] {
   return links;
 }
 
+/**
+ * Author details live in different places depending on the payload: a native
+ * tweet nests them under core.user_results.result, a flattened export may keep a
+ * screen_name at the top level. Both are checked.
+ */
+function rawAuthor(raw: JsonObject): { handle: string | null; name: string | null } {
+  const user = object(nested(raw, "core", "user_results", "result"));
+  const legacy = object(user?.legacy);
+  const core = object(user?.core);
+  const flat = object(raw.legacy);
+  return {
+    handle: string(legacy?.screen_name) ?? string(core?.screen_name) ?? string(flat?.screen_name),
+    name: string(legacy?.name) ?? string(core?.name) ?? string(flat?.name),
+  };
+}
+
 function nativeArticle(tweet: JsonObject): NormalizedArticle | null {
   const article = object(nested(tweet, "article", "article_results", "result"));
   if (!article) return null;
@@ -247,14 +263,13 @@ function normalizeNative(value: unknown): NormalizedPost | null {
   const id = string(tweet.rest_id);
   if (!id) return null;
   const user = object(nested(tweet, "core", "user_results", "result"));
-  const legacyUser = object(user?.legacy);
-  const coreUser = object(user?.core);
+  const author = rawAuthor(tweet);
   return {
     id,
     text: nativeText(tweet),
     authorId: string(user?.rest_id),
-    authorHandle: string(legacyUser?.screen_name) ?? string(coreUser?.screen_name),
-    authorName: string(legacyUser?.name) ?? string(coreUser?.name),
+    authorHandle: author.handle,
+    authorName: author.name,
     language: string(nested(tweet, "legacy", "lang")),
     postCreatedAt: validDate(nested(tweet, "legacy", "created_at")),
     savedAt: null,
@@ -304,6 +319,7 @@ function normalizeTweetXVault(value: unknown): NormalizedPost | null {
     : [];
   const raw = jsonObject(bookmark.raw_json) ?? bookmark;
   const rawLegacy = object(raw?.legacy);
+  const rawAuthorDetail = rawAuthor(raw);
   const text = string(bookmark.text) ?? string(bookmark.full_text) ?? string(bookmark.content) ?? string(rawLegacy?.full_text) ?? "";
   const urlValues = [bookmark.urls, bookmark.outbound_urls, bookmark.outboundUrls]
     .flatMap((value) => Array.isArray(value) ? value : [value]);
@@ -315,8 +331,8 @@ function normalizeTweetXVault(value: unknown): NormalizedPost | null {
     id,
     text,
     authorId: string(bookmark.author_id) ?? string(bookmark.authorId),
-    authorHandle: string(bookmark.author_username) ?? string(bookmark.author_handle) ?? string(bookmark.authorHandle) ?? string(rawLegacy?.screen_name),
-    authorName: string(bookmark.author_display_name) ?? string(bookmark.author_name) ?? string(bookmark.authorName) ?? string(rawLegacy?.name),
+    authorHandle: string(bookmark.author_username) ?? string(bookmark.author_handle) ?? string(bookmark.authorHandle) ?? rawAuthorDetail.handle,
+    authorName: string(bookmark.author_display_name) ?? string(bookmark.author_name) ?? string(bookmark.authorName) ?? rawAuthorDetail.name,
     language: string(bookmark.lang) ?? string(bookmark.language),
     postCreatedAt: validDate(bookmark.created_at) ?? validDate(bookmark.post_created_at) ?? validDate(bookmark.tweetCreatedAt),
     savedAt: validDate(bookmark.added_at) ?? validDate(bookmark.captured_at) ?? validDate(bookmark.saved_at) ?? validDate(bookmark.importedAt),
@@ -648,43 +664,53 @@ export function importXJson(db: AtlasDatabase, input: unknown, options: XImportO
   return { format: parsed.format, total: parsed.posts.length, imported, updated, removed, skipped, missingSavedAt };
 }
 
-export type RetitleResult = { scanned: number; retitled: number };
+export type RepairResult = { scanned: number; retitled: number; authored: number };
 
 /**
- * Give stored X article posts the title of their article. Import derives this on
- * every import, but rows written before that rule keep the bare link, and
- * re-importing them means a full TweetXVault sync. The title is read back out of
- * the raw payload already in the database, so this needs no network and no
- * re-export. Handles both raw shapes: a native tweet (article.article_results)
- * and a TweetXVault bookmark (article.title).
+ * Fill in the fields that can be derived from the raw payload already stored in
+ * the database: an article post's own title, and the author of the post. Import
+ * derives both, but rows written before those rules keep a bare t.co title and a
+ * null author, and re-importing them means a full TweetXVault sync. This needs
+ * neither the network nor a re-export.
  */
-export function retitleXArticles(db: AtlasDatabase): RetitleResult {
+export function repairXPosts(db: AtlasDatabase): RepairResult {
   const rows = db.prepare(`
-    SELECT p.resource_id AS id, p.raw_json AS raw, r.title AS current
-    FROM x_posts p
-    JOIN resources r ON r.id = p.resource_id
-    WHERE EXISTS (SELECT 1 FROM captures c WHERE c.resource_id = p.resource_id AND c.kind = 'x_article')
-  `).all() as Array<{ id: number; raw: string | null; current: string }>;
-  const update = db.prepare("UPDATE resources SET title = ?, updated_at = ? WHERE id = ?");
+    SELECT p.resource_id AS id, p.raw_json AS raw, r.title AS currentTitle, r.author AS currentAuthor
+    FROM x_posts p JOIN resources r ON r.id = p.resource_id
+  `).all() as Array<{ id: number; raw: string | null; currentTitle: string; currentAuthor: string | null }>;
+  const updateTitle = db.prepare("UPDATE resources SET title = ?, updated_at = ? WHERE id = ?");
+  const updateAuthor = db.prepare("UPDATE resources SET author = ?, updated_at = ? WHERE id = ?");
   const now = new Date().toISOString();
   let retitled = 0;
+  let authored = 0;
   db.exec("BEGIN IMMEDIATE");
   try {
     for (const row of rows) {
       const raw = jsonObject(row.raw) ?? {};
+      const handle = rawAuthor(raw).handle;
+      // Both shapes: a native tweet nests the article under article_results.
       const article = nativeArticle(raw) ?? normalizeArticle(raw.article);
-      const next = (article?.title ?? "").replace(/\s+/g, " ").trim();
-      if (!next || next === row.current) continue;
-      update.run(next.slice(0, 240), now, row.id);
-      refreshResourceFts(db, row.id);
-      retitled += 1;
+      const nextTitle = (article?.title ?? "").replace(/\s+/g, " ").trim();
+      let changed = false;
+      if (handle && handle !== row.currentAuthor) {
+        updateAuthor.run(handle, now, row.id);
+        authored += 1;
+      }
+      if (nextTitle && nextTitle !== row.currentTitle) {
+        updateTitle.run(nextTitle.slice(0, 240), now, row.id);
+        retitled += 1;
+        // Title is an indexed column, so only this branch needs the index refreshed.
+        // The author is not part of the full-text index.
+        changed = true;
+      }
+      if (changed) refreshResourceFts(db, row.id);
     }
     db.exec("COMMIT");
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
-  return { scanned: rows.length, retitled };
+  return { scanned: rows.length, retitled, authored };
 }
 
 export function importXJsonFile(db: AtlasDatabase, file: string, options: XImportOptions = {}): XImportResult {
