@@ -101,6 +101,16 @@ node src/cli.ts recall "reduce cache invalidation latency" --repo . --limit 5
 
 Agents get the same thing as the MCP tool `suggest_for_task` (task plus optional `repo_path`).
 
+### Consult — "here's where we are, what do I have?"
+
+Instead of describing the stage by hand, derive it from git (branch, recent commits, changed files) and rank your bookmarks against it:
+
+```bash
+node src/cli.ts recall --stage "multi-tenant sync" --repo . --limit 8
+```
+
+In pi, `/consult [focus]` does the same and opens the palette pre-ranked, each row showing *why* it matched. An explicit focus leads; the git stage adds context. With no focus at all, the stage itself is the query. This is the on-demand alternative to auto-recall — nothing is injected into your prompt unless you ask.
+
 ### Notes — context you write yourself
 
 Attach a short note to any bookmark explaining why it matters:
@@ -156,9 +166,13 @@ Media files are never copied. `x_media.local_path` points into TweetXVault's med
 /bookmarks local-first agents
 ```
 
-Keys: `↑↓` navigate, `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `esc` close.
+Keys: `↑↓` navigate, `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (relevance → newest → oldest → stars → A–Z), `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `esc` close.
 
-Also registered: `/recall <task>`, `/recall-auto`, and `/bookmark-note <id> <text>` (see [Recall](#recall--bookmarks-as-context-for-the-agent)).
+The filter row shows a live count per source plus how many bookmarks you have never used, so you can browse only your starred repositories, only your saved X posts, or only what you have forgotten about.
+
+Inserting or opening a bookmark records usage: it ranks higher in later consults and leaves the `unseen` set.
+
+Also registered: `/consult [focus]`, `/recall <task>`, `/recall-auto`, and `/bookmark-note <id> <text>` (see [Recall](#recall--bookmarks-as-context-for-the-agent)).
 
 Enable it with either:
 
