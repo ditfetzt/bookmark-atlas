@@ -163,7 +163,7 @@ Media files are never copied. `x_media.local_path` points into TweetXVault's med
 /bookmarks local-first agents
 ```
 
-Keys: `↑↓` navigate, `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (relevance → newest → oldest → stars → A–Z), `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `esc` close.
+Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows — `Cmd+↑`/`Cmd+↓` do the same where the terminal forwards Cmd — `tab` cycle the source filter (All → GitHub → X, `shift+tab` backwards), `ctrl+u` show only unseen, `ctrl+s` cycle sort (relevance → newest → oldest → stars → A–Z), `enter` insert the bookmark into the editor, `ctrl+y` copy the URL, `ctrl+o` open in the browser, `esc` close.
 
 The filter row shows a live count per source plus how many bookmarks you have never used, so you can browse only your starred repositories, only your saved X posts, or only what you have forgotten about.
 

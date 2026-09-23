@@ -49,6 +49,8 @@ function resolveRepoRoot(): string {
 const REPO_ROOT = resolveRepoRoot();
 const DB_PATH = process.env.BOOKMARK_ATLAS_DB ?? join(REPO_ROOT, "data", "bookmarks.db");
 const CLI_PATH = join(REPO_ROOT, "src", "cli.ts");
+// Rows visible in the list; also the jump size for PageUp/PageDown and Cmd+↑/↓.
+const LIST_ROWS = 10;
 
 type RecallHit = {
 	id: number;
@@ -210,7 +212,7 @@ function wrap(text: string, width: number, maxLines: number): string[] {
 	return lines;
 }
 
-class BookmarkPalette implements Component, Focusable {
+export class BookmarkPalette implements Component, Focusable {
 	focused = false;
 	private readonly input: Input;
 	private readonly items: Bookmark[];
@@ -358,6 +360,24 @@ class BookmarkPalette implements Component, Focusable {
 			this.cycleSort();
 			return;
 		}
+		// Jump navigation. macOS sends Fn+←/→ as home/end and Fn+↑/↓ as pageUp/pageDown;
+		// Cmd+↑/↓ arrives as super+up/down only when the terminal forwards the modifier.
+		if (matchesKey(data, "home")) {
+			this.selected = 0;
+			return;
+		}
+		if (matchesKey(data, "end")) {
+			this.selected = Math.max(0, this.filtered.length - 1);
+			return;
+		}
+		if (matchesKey(data, "pageUp") || matchesKey(data, "super+up")) {
+			this.selected = Math.max(0, this.selected - LIST_ROWS);
+			return;
+		}
+		if (matchesKey(data, "pageDown") || matchesKey(data, "super+down")) {
+			this.selected = Math.min(Math.max(0, this.filtered.length - 1), this.selected + LIST_ROWS);
+			return;
+		}
 		if (matchesKey(data, "up")) {
 			this.selected = Math.max(0, this.selected - 1);
 			return;
@@ -403,7 +423,6 @@ class BookmarkPalette implements Component, Focusable {
 			theme.fg("border", "│ ") + pad(content) + theme.fg("border", " │");
 
 		// Fixed row budgets keep the overlay the same size as the selection moves.
-		const LIST_ROWS = 10;
 		const EXCERPT_ROWS = 5;
 		const IMAGE_ROWS = 10;
 
@@ -438,7 +457,7 @@ class BookmarkPalette implements Component, Focusable {
 					chip("X", "x", counts.x) +
 					toggle(`unseen ${unseenCount}`, this.unseenOnly) +
 					theme.fg("dim", ` sort:${this.sortMode} `) +
-					theme.fg("dim", "tab/ctrl+u/ctrl+s"),
+					theme.fg("dim", "tab/ctrl+u/ctrl+s · ⇞⇟/home-end"),
 			),
 		);
 		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
