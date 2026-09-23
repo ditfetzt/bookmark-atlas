@@ -1,5 +1,6 @@
 import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 export type AtlasDatabase = DatabaseSync;
@@ -403,6 +404,31 @@ export function pruneOrphanResources(db: AtlasDatabase, options: { dryRun?: bool
   return { pruned: ids.length };
 }
 
+/**
+ * Per-user directory holding the database and other derived files.
+ *
+ * Deliberately not the checkout: installed as a package this module lives under
+ * node_modules, and writing a database inside an installed package is both
+ * surprising and broken on a read-only install. Resolving per user also means
+ * the CLI and the palette agree no matter which directory each is started from.
+ *
+ * Mirrored in extensions/bookmark-atlas/index.ts, which cannot import this
+ * module when it is symlinked into ~/.pi/agent/extensions. Keep the two in sync;
+ * test/db.test.ts fails if they drift apart.
+ */
+export function atlasDataDir(): string {
+  const override = process.env.BOOKMARK_ATLAS_DATA_DIR;
+  if (override) return resolve(override);
+  const home = homedir();
+  if (process.platform === "darwin") {
+    return join(home, "Library", "Application Support", "bookmark-atlas");
+  }
+  if (process.platform === "win32") {
+    return join(process.env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "bookmark-atlas");
+  }
+  return join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "bookmark-atlas");
+}
+
 export function databasePath(): string {
-  return process.env.BOOKMARK_ATLAS_DB ?? "./data/bookmarks.db";
+  return process.env.BOOKMARK_ATLAS_DB ?? join(atlasDataDir(), "bookmarks.db");
 }

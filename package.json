@@ -34,7 +34,9 @@
     "extensions/",
     "skills/",
     "scripts/",
+    "assets/",
     "README.md",
+    "docs/",
     "CHANGELOG.md",
     "LICENSE"
   ],

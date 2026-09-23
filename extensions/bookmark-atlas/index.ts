@@ -33,7 +33,8 @@ import {
 } from "@earendil-works/pi-tui";
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
@@ -51,8 +52,27 @@ function resolveRepoRoot(): string {
 	return join(dirname(real), "..", "..");
 }
 
+/**
+ * Per-user data directory. Mirrors atlasDataDir() in src/db.ts — this module
+ * cannot import it, because when the extension is symlinked into
+ * ~/.pi/agent/extensions a relative import resolves against the symlink and not
+ * the checkout. test/db.test.ts fails if the two ever drift apart.
+ */
+export function atlasDataDir(): string {
+	const override = process.env.BOOKMARK_ATLAS_DATA_DIR;
+	if (override) return resolve(override);
+	const home = homedir();
+	if (process.platform === "darwin") {
+		return join(home, "Library", "Application Support", "bookmark-atlas");
+	}
+	if (process.platform === "win32") {
+		return join(process.env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "bookmark-atlas");
+	}
+	return join(process.env.XDG_DATA_HOME ?? join(home, ".local", "share"), "bookmark-atlas");
+}
+
 const REPO_ROOT = resolveRepoRoot();
-const DB_PATH = process.env.BOOKMARK_ATLAS_DB ?? join(REPO_ROOT, "data", "bookmarks.db");
+const DB_PATH = process.env.BOOKMARK_ATLAS_DB ?? join(atlasDataDir(), "bookmarks.db");
 const CLI_PATH = join(REPO_ROOT, "src", "cli.ts");
 // Rows visible in the list; also the jump size for PageUp/PageDown and Cmd+↑/↓.
 const LIST_ROWS = 10;

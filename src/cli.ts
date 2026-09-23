@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { databasePath, openDatabase, pruneOrphanResources, refreshResourceFts } from "./db.ts";
+import { atlasDataDir, databasePath, openDatabase, pruneOrphanResources, refreshResourceFts } from "./db.ts";
 import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
 import { recall, relatedResources } from "./recall.ts";
@@ -57,13 +57,13 @@ Usage:
   bookmark-atlas embed [--limit N]
   bookmark-atlas get <resource-id> [--content]
   bookmark-atlas note <resource-id> <text...> [--clear]
-  bookmark-atlas use <resource-id> [--open]
   bookmark-atlas status
   bookmark-atlas prune [--dry-run]
   bookmark-atlas mcp
 
 Environment:
-  BOOKMARK_ATLAS_DB              SQLite path (default: ./data/bookmarks.db)
+  BOOKMARK_ATLAS_DB              SQLite path (default: ${databasePath()})
+  BOOKMARK_ATLAS_DATA_DIR        Data directory (default: ${atlasDataDir()})
   BOOKMARK_ATLAS_GITHUB_TOKEN    GitHub token (falls back to GH_TOKEN or gh auth token)
   BOOKMARK_ATLAS_TWEETXVAULT_BIN TweetXVault executable (default: tweetxvault)
   BOOKMARK_ATLAS_X_CAPTURE_TOKEN Required token for the local browser capture receiver

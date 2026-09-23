@@ -3,12 +3,14 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AtlasDatabase } from "./db.ts";
+import { atlasDataDir, type AtlasDatabase } from "./db.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = join(HERE, "..");
 const SOURCE = join(REPO_ROOT, "scripts", "macos-embed.swift");
-const BINARY = join(REPO_ROOT, "data", "macos-embed");
+// Compiled into the user data directory, not the checkout: an installed package
+// must not write into its own directory.
+const BINARY = join(atlasDataDir(), "macos-embed");
 const MAX_BATCH = 256;
 const MAX_QUERY_BYTES = 512 * 1024 * 1024;
 

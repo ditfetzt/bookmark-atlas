@@ -27,11 +27,10 @@ location:
 ATLAS="${BOOKMARK_ATLAS_ROOT:-<package root>}"
 ```
 
-The database location is `$BOOKMARK_ATLAS_DB`, defaulting to
-`<package root>/data/bookmarks.db`. If that default points inside an installed
-package directory, set `BOOKMARK_ATLAS_DB` to a path you own and pass the same
-value to the pi extension — for example
-`~/.local/share/bookmark-atlas/bookmarks.db`. Never write a database into
+The database lives in your per-user data directory — `$BOOKMARK_ATLAS_DB` if
+set, otherwise `bookmarks.db` inside `$BOOKMARK_ATLAS_DATA_DIR`
+(`~/Library/Application Support/bookmark-atlas` on macOS,
+`~/.local/share/bookmark-atlas` on Linux). Never write a database into
 `node_modules`.
 
 Every command below is `node "$ATLAS/src/cli.ts" …`. If the package was

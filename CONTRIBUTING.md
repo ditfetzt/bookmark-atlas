@@ -17,7 +17,7 @@ npm test
 ```
 
 Tests run against temporary SQLite databases and committed fixtures, so no
-GitHub token, no network, and no personal `data/bookmarks.db` are needed.
+GitHub token, no network, and no personal bookmarks database are needed.
 
 ## Before opening a pull request
 

@@ -4,7 +4,8 @@
 // (512 floats each) to stdout. No network, no model download, no third-party
 // dependency — it uses the embedding model built into macOS.
 //
-// Bookmark Atlas compiles this once into data/macos-embed and reuses it.
+// Bookmark Atlas compiles this once into the user data directory (see
+// atlasDataDir() in src/db.ts) and reuses the binary from there.
 
 import Foundation
 import NaturalLanguage
