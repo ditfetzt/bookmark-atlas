@@ -112,7 +112,7 @@ Agents get the same thing as the MCP tool `suggest_for_task` (task plus optional
 
 ### Consult — "here's where we are, what do I have?"
 
-Instead of describing the stage by hand, derive it from git (branch, recent commits, changed files) and rank your bookmarks against it:
+Instead of describing the stage by hand, derive it from git — the branch, recent commit subjects, and the files in play, including whatever the last few commits touched — and rank your bookmarks against it:
 
 ```bash
 node src/cli.ts recall --stage "multi-tenant sync" --repo . --limit 8

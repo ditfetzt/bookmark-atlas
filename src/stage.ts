@@ -22,6 +22,11 @@ function git(repoPath: string, args: string[]): string | null {
  * Summarize where a project currently is: the branch, recent commit subjects,
  * and the files in play. This is the "we are here right now" signal, so a
  * consult does not need the user to describe the stage by hand.
+ *
+ * Files are taken from the working tree *and* from what the last few commits
+ * touched. A clean tree used to leave the description as nothing but commit
+ * subjects, which are the noisiest part — "remove usage tracking" is one word
+ * away from matching a bookmark about removing something else.
  */
 export function collectStage(repoPath: string, focus = ""): StageSignals {
 	const branch = git(repoPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
@@ -33,13 +38,17 @@ export function collectStage(repoPath: string, focus = ""): StageSignals {
 		)
 		.filter((subject) => subject.length > 3);
 	const status = git(repoPath, ["status", "--porcelain"]);
-	const files = status
+	const uncommitted = status
 		? status
 				.split("\n")
 				.map((line) => line.slice(3).trim())
 				.filter(Boolean)
-				.slice(0, 20)
 		: [];
+	const touched = (git(repoPath, ["log", "--name-only", "--pretty=format:", "-n", "8"]) ?? "")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter(Boolean);
+	const files = [...new Set([...uncommitted, ...touched])].slice(0, 20);
 
 	const fileNames = files.map((file) => file.split("/").pop() ?? file);
 	// The branch is only informative when it is not the default.
