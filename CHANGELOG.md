@@ -4,6 +4,20 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-09-24
+
+Installing Bookmark Atlas no longer drags the pi coding agent's dependency tree along with
+it. Nothing about how the package runs changed — this release only corrects what npm installs
+next to it.
+
+### Highlights
+
+- **A plain `npm install bookmark-atlas` went from 147 packages to 1.** npm installs `peerDependencies` automatically, and ours pointed at the pi packages, so a bare install pulled in `openai`, `google-auth-library`, `protobufjs`, `esbuild` and the rest of pi's tree. Marking them optional stops that. pi still supplies both to the palette at runtime, which is the only place they are used.
+
+### Fixed
+
+- `peerDependenciesMeta` marks `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` optional. The CLI imports neither, so a consumer who only wants the command now installs one package instead of 148. This matches what the most-downloaded pi package does.
+
 ## [0.1.0] - 2026-09-23
 
 Bookmark Atlas turns your starred GitHub repositories and saved X bookmarks into a local,
@@ -47,4 +61,5 @@ dependency — Node's standard library and its built-in SQLite only.
 - `--help` no longer advertises a `use` command that was removed with usage tracking.
 - `--help` prints the database path it will actually use, instead of a hardcoded string that had gone stale.
 
+[0.1.1]: https://github.com/ditfetzt/bookmark-atlas/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ditfetzt/bookmark-atlas/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
 {
   "name": "bookmark-atlas",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local SQLite knowledge base for your GitHub stars and X bookmarks, with full-text search, a CLI, an MCP server, and a pi search palette.",
   "keywords": [
     "pi-package",
@@ -66,6 +66,14 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
     "@earendil-works/pi-tui": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.87.0",
