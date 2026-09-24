@@ -201,4 +201,4 @@ Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) 
 
 ## License
 
-[MIT](LICENSE) © Mæxim
+[MIT](LICENSE) © [ditfetzt](https://github.com/ditfetzt)
