@@ -1,14 +1,34 @@
 # Bookmark Atlas
 
-[![CI](https://img.shields.io/github/actions/workflow/status/ditfetzt/bookmark-atlas/ci.yml?branch=main&label=CI)](https://github.com/ditfetzt/bookmark-atlas/actions/workflows/ci.yml)
+[![npm](https://img.shields.io/npm/v/bookmark-atlas?style=for-the-badge&logo=npm&color=CB3837&logoColor=white)](https://www.npmjs.com/package/bookmark-atlas)
+[![ci](https://img.shields.io/github/actions/workflow/status/ditfetzt/bookmark-atlas/ci.yml?branch=main&style=for-the-badge&logo=github-actions&logoColor=white&label=CI)](https://github.com/ditfetzt/bookmark-atlas/actions/workflows/ci.yml)
+[![license](https://img.shields.io/github/license/ditfetzt/bookmark-atlas?style=for-the-badge&color=blue)](LICENSE)
+[![node](https://img.shields.io/badge/node-%E2%89%A524-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![deps](https://img.shields.io/badge/dependencies-0-brightgreen?style=for-the-badge)](package.json)
 
-<img src="assets/palette.svg" alt="The /bookmarks palette: typing a query narrows the list to the bookmarks that match" width="820">
+**Turn your GitHub stars and saved X bookmarks into a local, searchable knowledge base your coding agent can actually use.**
 
-Turn your GitHub stars and X bookmarks into a local, searchable knowledge base for coding agents. Everything lives in one SQLite file, with full-text search over titles, descriptions, topics, and the captured text of every README, post, and article you saved.
+> You starred it for a reason. A year later it is one of 650 entries in a list you never open, and the one repo that answers the question you have right now is buried somewhere in the middle. Bookmark Atlas keeps every bookmark — plus the full text of every README, post, and article you saved — in a single SQLite file, and puts it where your agent can reach it.
 
-Three read-only interfaces over that one database: a **CLI**, an **MCP server**, and a `/bookmarks` palette inside [pi](https://pi.dev).
+## Preview
 
-No web dashboard, no hosted API, no background service, and no runtime dependencies — Node's standard library and its built-in SQLite only.
+<p align="center">
+  <img src="assets/palette.svg" alt="The /bookmarks palette narrowing a list as a query is typed" width="100%">
+</p>
+
+<p align="center"><sub>Typing narrows titles <b>and</b> the full text of everything you saved. <code>ctrl+e</code> reads it, <code>ctrl+l</code> pivots to what relates, <code>enter</code> drops it into your prompt.</sub></p>
+
+## Three interfaces, one database
+
+Every one of them reads. None of them writes to your database.
+
+| Interface | What it gives you |
+| --- | --- |
+| **CLI** | `search`, `recall`, `related`, `get`, `note` — for scripts, and for agents with shell access |
+| **MCP server** | `bookmark-atlas mcp` over stdio, exposing four read-only tools to any MCP-capable harness |
+| **pi palette** | `/bookmarks` and `/consult` inside [pi](https://pi.dev) — filters, a reading pane, notes, inline images |
+
+There is no web dashboard, no hosted API, and no background service. Everything runs on your machine against one SQLite file, with no runtime dependencies — Node's standard library and its built-in SQLite only.
 
 ## Install
 
@@ -17,7 +37,7 @@ pi install npm:bookmark-atlas      # palette extension + agent skill
 npm install -g bookmark-atlas      # the CLI
 ```
 
-From source (no build needed — Node runs the TypeScript directly):
+From source — no build needed, Node runs the TypeScript directly:
 
 ```bash
 git clone https://github.com/ditfetzt/bookmark-atlas.git
@@ -29,16 +49,16 @@ node src/cli.ts status
 ## Quick start
 
 ```bash
-node src/cli.ts sync github             # import your starred repositories
-node src/cli.ts enrich github-readmes   # fetch the README text behind them
-node src/cli.ts search "local-first agents"
+bookmark-atlas sync github             # import your starred repositories
+bookmark-atlas enrich github-readmes   # fetch the README text behind them
+bookmark-atlas search "local-first agents"
 ```
 
 ## Requirements
 
-- Node.js 24 or newer — the code uses the built-in `node:sqlite` with FTS5 and Node's native TypeScript type stripping. The published package ships compiled JavaScript, because Node refuses to strip types for files under `node_modules`; the repository is run from source with no build.
+- Node.js 24 or newer. The code uses the built-in `node:sqlite` with FTS5. The published package ships compiled JavaScript, because Node refuses to strip TypeScript types for files under `node_modules`; a checkout runs from source with no build.
 - GitHub CLI authenticated with `gh auth login`, or a `BOOKMARK_ATLAS_GITHUB_TOKEN`.
-- Optional: [TweetXVault](https://github.com/lhl/tweetxvault) on `PATH` for `collect x`, or [Ego Browser](https://lite.ego.app/) for `capture x`.
+- Optional: [TweetXVault](https://github.com/lhl/tweetxvault) on `PATH` for `collect x`, or [Ego Browser](https://lite.ego.app/) for `capture x`. Neither is installed for you, and neither is needed unless you use that command.
 
 GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `GH_TOKEN`, then `gh auth token`. Tokens are never written to the database or to logs.
 
@@ -69,7 +89,7 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 `recall` ranks your library against a task, biased by the project you are in. It reads `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod`, and `Cargo.toml` for dependency and language signals, then fuses four independent rankings — resource text, chunk passages, metadata, and project context — with Reciprocal Rank Fusion rather than summing them into one flat score.
 
 ```bash
-node src/cli.ts recall "reduce cache invalidation latency" --repo . --limit 5
+bookmark-atlas recall "reduce cache invalidation latency" --repo . --limit 5
 ```
 
 Every hit carries `whyMatched` reasons and its best matching passage. When a question is too vague to rank on its own words, the project's name and README intro are added as context terms, so "is there anything that helps here?" still lands in the project's domain.
@@ -77,7 +97,7 @@ Every hit carries `whyMatched` reasons and its best matching passage. When a que
 `recall --stage` derives where the project is from git — branch, recent commit subjects, and the files in play — instead of making you describe it:
 
 ```bash
-node src/cli.ts recall --stage "multi-tenant sync" --repo . --limit 8
+bookmark-atlas recall --stage "multi-tenant sync" --repo . --limit 8
 ```
 
 In pi, `/consult [focus]` does the same and opens the palette pre-ranked. Nothing is ever injected into your prompt unless you ask.
@@ -85,7 +105,7 @@ In pi, `/consult [focus]` does the same and opens the palette pre-ranked. Nothin
 **Notes are the strongest signal.** Attach one to any bookmark explaining why it matters; they are searchable, returned by `get` and `recall`, and shown in the palette.
 
 ```bash
-node src/cli.ts note 406 "Closest blueprint: hybrid BM25+vector with RRF"
+bookmark-atlas note 406 "Closest blueprint: hybrid BM25+vector with RRF"
 ```
 
 ## pi palette
@@ -121,8 +141,7 @@ The same read-only retrieval core is available over stdio:
 }
 ```
 
-Without a global install, point it at the compiled entry inside the repository
-(run `npm run build` first):
+Without a global install, point it at the compiled entry inside the repository (run `npm run build` first):
 
 ```json
 {

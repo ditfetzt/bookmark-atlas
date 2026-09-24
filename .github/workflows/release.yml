@@ -101,6 +101,7 @@ jobs:
             writeFileSync("/tmp/notes.md", `${body}\n`);
           ' "$version"
           gh release create "$GITHUB_REF_NAME" \
+            --title "$version" \
             --notes-file /tmp/notes.md --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}
