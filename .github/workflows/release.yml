@@ -70,7 +70,37 @@ jobs:
           fi
           npm publish --provenance --access public
 
+      # Release notes come from CHANGELOG.md, so what a reader sees on the
+      # release page is written rather than scraped from commit subjects. Falls
+      # back to generated notes if the version has no section.
       - name: Open the GitHub release
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          node --input-type=module -e '
+            import { readFileSync, writeFileSync } from "node:fs";
+            const version = process.argv[1];
+            const heading = /^## \\[?v?/;
+            const lines = readFileSync("CHANGELOG.md", "utf8").split("\n");
+            const isTarget = (line) =>
+              line.startsWith(`## [${version}]`) ||
+              line.trim() === `## ${version}`;
+            const start = lines.findIndex(isTarget);
+            if (start === -1) {
+              console.error(`no CHANGELOG section for ${version}`);
+              process.exit(1);
+            }
+            let end = lines.length;
+            for (let i = start + 1; i < lines.length; i += 1) {
+              if (heading.test(lines[i])) { end = i; break; }
+            }
+            const body = lines
+              .slice(start + 1, end)
+              .filter((line) => !/^\[[^\]]+\]:\s+\S/.test(line))
+              .join("\n")
+              .trim();
+            writeFileSync("/tmp/notes.md", `${body}\n`);
+          ' "$version"
+          gh release create "$GITHUB_REF_NAME" \
+            --notes-file /tmp/notes.md --verify-tag
         env:
           GH_TOKEN: ${{ github.token }}
