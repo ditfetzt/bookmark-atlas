@@ -79,7 +79,7 @@ jobs:
           node --input-type=module -e '
             import { readFileSync, writeFileSync } from "node:fs";
             const version = process.argv[1];
-            const heading = /^## \\[?v?/;
+            const heading = /^## \[?v?/;
             const lines = readFileSync("CHANGELOG.md", "utf8").split("\n");
             const isTarget = (line) =>
               line.startsWith(`## [${version}]`) ||
