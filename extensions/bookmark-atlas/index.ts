@@ -1237,7 +1237,7 @@ export class BookmarkPalette implements Component, Focusable {
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("bookmarks", {
-		description: "Search your starred bookmarks and saved X posts",
+		description: "Search your GitHub stars, X posts, and browser bookmarks",
 		handler: async (args: string, ctx: ExtensionCommandContext) => {
 			if (ctx.mode !== "tui") {
 				if (ctx.hasUI) ctx.ui.notify("/bookmarks requires interactive TUI mode", "warning");

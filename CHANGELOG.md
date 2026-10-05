@@ -28,8 +28,10 @@ and posts, so the same search, the same recall ranking, and the same palette rea
 
 ### Changed
 
+- **Every development dependency is now at its latest release.** TypeScript 5.9 → 7.0, `@types/node` 24 → 26, and the pi packages 0.87 → 1.0.4. The source itself needed no changes: the only thing TypeScript 7 broke was an implicit source root, which is now pinned explicitly, and `@types/node` 26 matches the Node 26 that actually runs this project. The palette needed no port to pi 1.0 — it already guarded on `ctx.mode`, used `ctx.hasUI`, and passed `overlay: true` with a responsive width, which is what the 1.0 extension contract asks for.
 - `sync browsers` is safe to re-run: a second pass updates rather than re-imports, and reports the two counts separately.
 - Only `http` and `https` bookmarks are imported. `javascript:`, `chrome://` and `file://` entries are counted and skipped rather than stored as rows nothing can search or fetch.
+- `/bookmarks` now describes itself as searching GitHub stars, X posts, and browser bookmarks. It had said only stars and posts since the browser work landed.
 
 ### Notes
 
