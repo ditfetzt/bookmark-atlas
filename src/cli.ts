@@ -7,6 +7,7 @@ import { collectStage } from "./stage.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile, repairXPosts } from "./x.ts";
 import { collectXBookmarks } from "./collector.ts";
+import { discoverBrowserSources, readBrowserSource, syncBrowserBookmarks } from "./browsers.ts";
 import { startXCaptureServer } from "./receiver.ts";
 import { startMcpServer } from "./mcp.ts";
 
@@ -23,6 +24,8 @@ const VALUE_FLAGS = new Set([
   "--account",
   "--concurrency",
   "--port",
+  "--browser",
+  "--profile",
 ]);
 
 function positional(args: string[]): string[] {
@@ -44,6 +47,8 @@ function printHelp(): void {
 
 Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
+  bookmark-atlas sync browsers [--browser NAME] [--profile NAME] [--limit N]
+  bookmark-atlas browsers
   bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
   bookmark-atlas enrich x-posts
   bookmark-atlas import x-json <file> [--account NAME] [--reconcile]
@@ -122,6 +127,49 @@ async function main(): Promise<void> {
         ...(limit ? { limit } : {}),
       });
       console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (command === "sync" && args[1] === "browsers") {
+      const rawLimit = optionValue(args, "--limit");
+      const limit = rawLimit ? Number.parseInt(rawLimit, 10) : undefined;
+      if (rawLimit && (!Number.isFinite(limit) || (limit ?? 0) < 1)) {
+        throw new Error("--limit must be a positive integer");
+      }
+      const provider = optionValue(args, "--browser");
+      const profile = optionValue(args, "--profile");
+      const result = syncBrowserBookmarks(db, {
+        ...(provider ? { provider } : {}),
+        ...(profile ? { profile } : {}),
+        ...(limit ? { limit } : {}),
+      });
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+
+    if (command === "browsers") {
+      // The diagnostic for "why is Safari empty?": it reports the permission
+      // error per source instead of failing the whole run.
+      const sources = discoverBrowserSources().map((source) => {
+        try {
+          return {
+            provider: source.provider,
+            profile: source.profile,
+            kind: source.kind,
+            path: source.path,
+            bookmarks: readBrowserSource(source).length,
+          };
+        } catch (error) {
+          return {
+            provider: source.provider,
+            profile: source.profile,
+            kind: source.kind,
+            path: source.path,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      });
+      console.log(JSON.stringify({ found: sources.length, sources }, null, 2));
       return;
     }
 

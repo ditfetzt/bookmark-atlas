@@ -6,9 +6,9 @@
 [![node](https://img.shields.io/badge/node-%E2%89%A524-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![deps](https://img.shields.io/badge/dependencies-0-brightgreen?style=for-the-badge)](package.json)
 
-**Turn your GitHub stars and saved X bookmarks into a local, searchable knowledge base your coding agent can actually use.**
+**Turn everything you save — GitHub stars, X posts, browser bookmarks — into one local, searchable knowledge base your coding agent can actually use.**
 
-> You starred it for a reason. A year later it is one of 650 entries in a list you never open, and the one repo that answers the question you have right now is buried somewhere in the middle. Bookmark Atlas keeps every bookmark — plus the full text of every README, post, and article you saved — in a single SQLite file, and puts it where your agent can reach it.
+> You saved it for a reason. A year later it is one of a thousand entries spread across four places you never open, and the one page that answers the question you have right now is buried somewhere in the middle. Bookmark Atlas keeps every one of them — plus the full text of every README, post, and article you saved — in a single SQLite file, and puts it where your agent can reach it.
 
 ## Preview
 
@@ -50,6 +50,7 @@ node src/cli.ts status
 
 ```bash
 bookmark-atlas sync github             # import your starred repositories
+bookmark-atlas sync browsers           # import your browser bookmarks
 bookmark-atlas enrich github-readmes   # fetch the README text behind them
 bookmark-atlas search "local-first agents"
 ```
@@ -59,6 +60,7 @@ bookmark-atlas search "local-first agents"
 - Node.js 24 or newer. The code uses the built-in `node:sqlite` with FTS5. The published package ships compiled JavaScript, because Node refuses to strip TypeScript types for files under `node_modules`; a checkout runs from source with no build.
 - GitHub CLI authenticated with `gh auth login`, or a `BOOKMARK_ATLAS_GITHUB_TOKEN`.
 - Optional: [TweetXVault](https://github.com/lhl/tweetxvault) on `PATH` for `collect x`, or [Ego Browser](https://lite.ego.app/) for `capture x`. Neither is installed for you, and neither is needed unless you use that command.
+- For Safari bookmarks: Full Disk Access for your terminal, granted in System Settings → Privacy & Security → Full Disk Access. macOS protects `~/Library/Safari`; without it `sync browsers` reports the error for Safari alone and the other browsers still work.
 
 GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `GH_TOKEN`, then `gh auth token`. Tokens are never written to the database or to logs.
 
@@ -67,6 +69,8 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 | Command | What it does |
 | --- | --- |
 | `sync github [--limit N]` | Incremental GitHub star sync (metadata only) |
+| `sync browsers [--browser NAME] [--profile NAME] [--limit N]` | Import browser bookmarks from every browser found |
+| `browsers` | List the browser bookmark sources found, and whether each is readable |
 | `enrich github-readmes` | Fetch README text; incremental and ETag-aware |
 | `enrich x-posts` | Repair X titles and authors from the stored payload |
 | `import x-json <file>` | Import a Siftly or TweetXVault export |
@@ -83,6 +87,30 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 | `mcp` | MCP server over stdio |
 
 `sync github` imports metadata only — run `enrich github-readmes` to fetch the actual text. Re-running is cheap. See [docs/details.md](docs/details.md) for import quirks, `prune` semantics, and the sort and date rules.
+
+## Browser bookmarks
+
+`sync browsers` reads bookmarks from where each browser already keeps them. No export, no extension, no account.
+
+| Browser | Read from |
+| --- | --- |
+| Chrome, Chromium, Brave, Edge, Vivaldi, Arc, Opera, Ego Browser | the `Bookmarks` JSON every Chromium browser writes, one reader for all of them |
+| Safari | `~/Library/Safari/Bookmarks.plist`, converted with the macOS `plutil` |
+| Firefox | `places.sqlite`, read the same way the rest of this project reads SQLite |
+
+```bash
+bookmark-atlas browsers                  # what was found, and what is readable
+bookmark-atlas sync browsers             # import all of it
+bookmark-atlas sync browsers --browser brave --profile Default
+```
+
+A bookmark becomes a `web_page` resource with the same standing as a star or a post, so `search`, `recall`, `related`, and `/bookmarks` all reach it. Its folder is recorded alongside the save, and the palette's `tab` key gains a **Browsers** filter.
+
+Re-running is safe: a second pass updates instead of re-importing. Delete a bookmark in your browser and the next sync marks it removed — nothing is deleted until you run `prune`, which takes `--dry-run`. A page that is both a starred repository and a bookmark resolves to a single resource, and tracking parameters are stripped so the same link saved in two browsers is one bookmark.
+
+**Safari needs Full Disk Access.** macOS protects `~/Library/Safari`, so grant your terminal access in System Settings → Privacy & Security → Full Disk Access. Without it, `sync browsers` reports the error for Safari and leaves those bookmarks untouched, rather than reading a blocked file as an empty one.
+
+**Only `http` and `https` are imported.** `javascript:`, `chrome://`, and `file://` entries are counted and skipped — they cannot be fetched, and they are not pages.
 
 ## Recall — bookmarks as context for the agent
 

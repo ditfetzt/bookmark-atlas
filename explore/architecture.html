@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookmark Atlas - How it works</title>
+<style>
+  /* ---------- Tokens (fixed scales, HSL, colour roles) ---------- */
+  :root {
+    --g-50:hsl(220 20% 98%);  --g-100:hsl(220 18% 95%); --g-200:hsl(220 16% 90%);
+    --g-300:hsl(220 14% 82%); --g-400:hsl(220 10% 62%); --g-500:hsl(220 9% 44%);
+    --g-600:hsl(220 11% 34%); --g-700:hsl(220 14% 25%); --g-800:hsl(220 18% 17%);
+    --g-900:hsl(220 24% 10%);
+    --a-50:hsl(172 50% 95%);  --a-100:hsl(172 46% 89%); --a-200:hsl(172 44% 78%);
+    --a-300:hsl(172 46% 60%); --a-600:hsl(172 75% 27%); --a-700:hsl(172 80% 21%);
+    --warn-bg:hsl(40 92% 93%); --warn-line:hsl(38 80% 50%); --warn-text:hsl(30 90% 24%);
+    --bad-bg:hsl(2 85% 95%);   --bad-text:hsl(2 70% 34%);
+
+    --bg:var(--g-100); --surface:#fff; --surface-2:var(--g-50);
+    --text:var(--g-900); --text-2:var(--g-600); --text-3:var(--g-500);
+    --line:var(--g-200); --line-strong:var(--g-300);
+    --accent:var(--a-600); --accent-strong:var(--a-700); --accent-bg:var(--a-50); --accent-line:var(--a-200);
+    --edge:var(--g-400); --edge-on:var(--a-600);
+    --shadow-1:0 1px 3px hsl(220 30% 20% / .10);
+    --shadow-2:0 4px 6px hsl(220 30% 20% / .10);
+
+    --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:24px; --s6:32px; --s7:48px; --s8:64px;
+    --radius:12px;
+    --ease-out:cubic-bezier(0.23, 1, 0.32, 1);
+    --sans:ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    --mono:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg:hsl(220 24% 7%); --surface:hsl(220 22% 11%); --surface-2:hsl(220 20% 14%);
+      --text:hsl(220 20% 94%); --text-2:hsl(220 12% 72%); --text-3:hsl(220 10% 62%);
+      --line:hsl(220 16% 19%); --line-strong:hsl(220 14% 28%);
+      --accent:hsl(172 55% 52%); --accent-strong:hsl(172 60% 64%);
+      --accent-bg:hsl(172 35% 13%); --accent-line:hsl(172 30% 26%);
+      --edge:hsl(220 10% 42%); --edge-on:hsl(172 60% 58%);
+      --warn-bg:hsl(38 45% 14%); --warn-line:hsl(38 70% 48%); --warn-text:hsl(40 85% 70%);
+      --bad-bg:hsl(2 40% 15%);  --bad-text:hsl(2 85% 76%);
+      --shadow-1:0 1px 3px hsl(0 0% 0% / .5); --shadow-2:0 4px 6px hsl(0 0% 0% / .45);
+    }
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; scroll-padding-top:var(--s5); }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior:auto; } }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 var(--sans); -webkit-font-smoothing:antialiased; }
+  code, .mono { font-family:var(--mono); font-size:.9em; }
+  a { color:var(--accent-strong); }
+  p { margin:0 0 var(--s3); }
+  p:last-child { margin-bottom:0; }
+
+  /* ---------- Layout ---------- */
+  .page { max-width:1280px; margin:0 auto; padding:var(--s5); display:grid; grid-template-columns:184px minmax(0,1fr); column-gap:var(--s5); align-items:start; }
+  nav.toc { position:sticky; top:var(--s5); background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow-1); padding:var(--s3); max-height:calc(100vh - 48px); overflow:auto; }
+  nav.toc strong { display:block; font-size:12px; color:var(--text-3); font-weight:600; padding:var(--s1) var(--s3) var(--s2); }
+  nav.toc a { display:block; padding:6px var(--s3); border-radius:8px; font-size:14px; line-height:1.35; color:var(--text-2); text-decoration:none; transition:color 150ms ease, background-color 150ms ease; }
+  nav.toc a[aria-current="true"] { color:var(--accent-strong); background:var(--accent-bg); font-weight:600; }
+  @media (hover:hover) and (pointer:fine) { nav.toc a:hover { color:var(--text); background:var(--surface-2); } }
+  main { min-width:0; display:grid; gap:var(--s5); }
+
+  /* A panel is one bordered section: header row, then body. */
+  .panel { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow-1); overflow:hidden; min-width:0; }
+  .panel > header { padding:var(--s4) var(--s5); border-bottom:1px solid var(--line); background:var(--surface-2); }
+  .panel > header h2 { margin:0; font-size:20px; line-height:1.3; letter-spacing:-0.01em; font-weight:700; }
+  .panel > header p { margin:2px 0 0; color:var(--text-2); font-size:14px; max-width:80ch; }
+  .body { padding:var(--s5); }
+  .two { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:var(--s5); }
+  .cols { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:var(--s5); align-items:start; }
+  .sub-panel { border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; min-width:0; }
+  .sub-panel > h3 { margin:0; padding:var(--s3) var(--s4); font-size:15px; background:var(--surface-2); border-bottom:1px solid var(--line); }
+  .sub-panel > .in { padding:var(--s4); }
+  @media (max-width:1000px) { .two, .cols { grid-template-columns:1fr; } }
+  @media (max-width:900px) {
+    .page { display:block; padding:var(--s3); }
+    nav.toc { position:sticky; top:var(--s2); z-index:5; display:flex; gap:var(--s1); overflow-x:auto; padding:var(--s2); margin-bottom:var(--s3); max-height:none; }
+    nav.toc strong { display:none; } nav.toc a { white-space:nowrap; }
+    .body { padding:var(--s4); }
+  }
+
+  /* ---------- Hero ---------- */
+  .hero { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow-1); overflow:hidden; }
+  .hero .top { padding:var(--s6) var(--s5) var(--s5); }
+  .hero h1 { margin:0 0 var(--s3); font-size:36px; line-height:1.1; letter-spacing:-0.03em; font-weight:700; }
+  .hero .lead { font-size:18px; line-height:1.5; color:var(--text-2); max-width:70ch; margin:0 0 var(--s3); }
+  .hero .howto { font-size:13px; color:var(--text-3); margin:0; }
+  .stats { display:grid; grid-template-columns:repeat(5, 1fr); border-top:1px solid var(--line); }
+  .stat { padding:var(--s4) var(--s5); border-left:1px solid var(--line); }
+  .stat:first-child { border-left:0; }
+  .stat b { display:block; font-size:24px; line-height:1.2; letter-spacing:-0.02em; font-weight:700; }
+  .stat span { font-size:13px; color:var(--text-2); }
+  @media (max-width:700px) { .stats { grid-template-columns:repeat(2,1fr); } .stat { border-top:1px solid var(--line); } .hero .top { padding:var(--s5) var(--s4); } }
+
+  /* ---------- Plain-words strip and technical text ---------- */
+  .plain { background:var(--accent-bg); border:1px solid var(--accent-line); border-left:4px solid var(--accent); border-radius:8px; padding:var(--s3) var(--s4); margin-bottom:var(--s5); font-size:15px; }
+  .plain > b { display:block; font-size:13px; color:var(--accent-strong); margin-bottom:2px; }
+  .plain em { font-style:normal; font-weight:700; }
+  .tech { font-size:13px; color:var(--text-2); }
+  .ref { font-family:var(--mono); font-size:12px; color:var(--text-3); white-space:nowrap; }
+  .pill { display:inline-block; font-size:11px; font-weight:600; line-height:1; padding:4px 8px; border-radius:999px; border:1px solid var(--line-strong); color:var(--text-2); background:var(--surface); white-space:nowrap; vertical-align:1px; }
+  .pill.guess { border-style:dashed; border-color:var(--warn-line); background:var(--warn-bg); color:var(--warn-text); }
+  .pill.read { background:var(--accent-bg); border-color:var(--accent-line); color:var(--accent-strong); }
+
+  /* ---------- Diagram ---------- */
+  .figure { margin:0; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface-2); padding:var(--s3) var(--s4); }
+  .figure .scroll { overflow-x:auto; }
+  .figure figcaption { font-size:13px; color:var(--text-3); padding-top:var(--s2); }
+  svg#arch { display:block; width:100%; min-width:720px; height:auto; font-family:var(--sans); }
+  .lane-label { font-size:13px; font-weight:600; fill:var(--text-3); }
+  .node { cursor:default; outline:none; transition:opacity 150ms var(--ease-out); }
+  .node rect { fill:var(--surface); stroke:var(--line-strong); stroke-width:1.5; transition:stroke 150ms var(--ease-out), fill 150ms var(--ease-out); }
+  .node.entry rect { fill:var(--surface-2); }
+  .node.door rect { fill:var(--accent-bg); stroke:var(--accent-line); }
+  .node.core rect { fill:var(--accent-bg); stroke:var(--accent); stroke-width:2; }
+  .node.store rect { fill:var(--g-800); stroke:var(--g-800); }
+  .node.outside rect { stroke-dasharray:6 4; fill:var(--bg); }
+  .node .t { font-size:15px; font-weight:600; fill:var(--text); }
+  .node .s { font-size:13px; fill:var(--text-3); font-family:var(--mono); }
+  .node.store .t { fill:#fff; } .node.store .s { fill:hsl(220 12% 78%); }
+  .node:focus-visible rect, .node.on rect { stroke:var(--accent); stroke-width:2.5; }
+  .edge { fill:none; stroke:var(--edge); stroke-width:1.5; marker-end:url(#arr); transition:opacity 150ms var(--ease-out), stroke 150ms var(--ease-out); }
+  .edge.dash { stroke-dasharray:5 4; }
+  .edge.on { stroke:var(--edge-on); stroke-width:2.5; marker-end:url(#arr-on); opacity:1; }
+  .has-focus .edge:not(.on) { opacity:.15; }
+  .has-focus .node:not(.on) { opacity:.35; }
+  #arr path { fill:var(--edge); } #arr-on path { fill:var(--edge-on); }
+
+  /* ---------- Steps ---------- */
+  ol.steps { list-style:none; margin:0; padding:0; counter-reset:step; }
+  ol.steps li { position:relative; padding:0 0 var(--s4) 44px; counter-increment:step; min-height:32px; }
+  ol.steps li::before { content:counter(step); position:absolute; left:0; top:0; width:28px; height:28px; border-radius:50%; background:var(--accent); color:#fff; font-weight:700; font-size:13px; display:flex; align-items:center; justify-content:center; }
+  ol.steps li::after { content:""; position:absolute; left:13px; top:34px; bottom:6px; width:2px; background:var(--accent-line); }
+  ol.steps li:last-child { padding-bottom:0; } ol.steps li:last-child::after { display:none; }
+  ol.steps li b { display:block; font-size:15px; line-height:1.4; }
+  ol.steps li span { display:block; font-size:13px; color:var(--text-2); }
+
+  /* ---------- Tables ---------- */
+  table.t { width:100%; border-collapse:collapse; font-size:14px; }
+  table.t th { text-align:left; font-size:12px; font-weight:600; color:var(--text-3); padding:var(--s2) var(--s4); background:var(--surface-2); border-bottom:1px solid var(--line); }
+  table.t td { padding:var(--s3) var(--s4); vertical-align:top; border-top:1px solid var(--line); }
+  table.t tr.grp td { background:var(--surface-2); font-weight:600; font-size:13px; color:var(--text-2); padding:var(--s2) var(--s4); }
+  table.t tr.grp:first-child td { border-top:0; }
+  table.t td.n { width:27%; font-family:var(--mono); font-size:13px; font-weight:600; word-break:break-word; }
+  table.t td.n small { display:block; font-family:var(--sans); font-weight:400; color:var(--text-3); font-size:12px; }
+  table.t td.w { width:38%; } table.t td.h { color:var(--text-2); font-size:13px; }
+  table.t.flush { border:0; }
+  table.t td.num { text-align:right; font-family:var(--mono); font-weight:700; white-space:nowrap; width:1%; }
+  @media (max-width:800px) { table.t td.n, table.t td.w { width:auto; } table.t .hide-s { display:none; } }
+
+  /* ---------- Cards, bars ---------- */
+  .cards { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:var(--s3); }
+  .card { border:1px solid var(--line); border-radius:10px; padding:var(--s4); background:var(--surface-2); }
+  .card.dark { background:var(--g-800); border-color:var(--g-800); color:#fff; }
+  .card.dark .tech { color:hsl(220 12% 78%); } .card.dark .ref { color:hsl(220 12% 70%); } .card.dark code { color:#fff; }
+  .card h4 { margin:0 0 var(--s1); font-size:15px; }
+  .card p { font-size:14px; margin-bottom:var(--s2); }
+  @media (max-width:1100px) { .cards { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  .bars { display:grid; grid-template-columns:minmax(120px,200px) minmax(0,1fr) 28px; gap:var(--s2) var(--s3); align-items:center; }
+  .bars .l { font-family:var(--mono); font-size:12px; text-align:right; overflow-wrap:anywhere; }
+  .bars .b { height:10px; border-radius:5px; background:var(--accent); }
+  .bars .b.docs { background:var(--g-400); } .bars .b.test { background:var(--a-300); }
+  .bars .n { font-weight:700; font-size:13px; }
+  .legend { font-size:12px; color:var(--text-2); display:flex; gap:var(--s4); flex-wrap:wrap; margin-top:var(--s3); }
+  .legend i { display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:6px; vertical-align:0; }
+  .weeks { display:flex; align-items:flex-end; gap:var(--s4); height:140px; }
+  .weeks .w { flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:4px; height:100%; }
+  .weeks .col { width:100%; background:var(--accent); border-radius:6px 6px 0 0; min-height:2px; }
+  .weeks .col.zero { background:var(--line-strong); }
+  .weeks b { font-size:14px; } .weeks span { font-size:12px; color:var(--text-3); }
+
+  /* ---------- Risks and lists ---------- */
+  .rk { display:grid; grid-template-columns:112px minmax(0,1fr); gap:var(--s4); padding:var(--s4) var(--s5); border-top:1px solid var(--line); }
+  .rk:first-child { border-top:0; }
+  .rk b { display:block; font-size:15px; line-height:1.4; }
+  .rk p { margin:2px 0 var(--s1); font-size:14px; }
+  .level { display:inline-block; font-size:11px; font-weight:700; padding:4px 8px; border-radius:6px; white-space:nowrap; align-self:start; text-align:center; }
+  .level.med { background:var(--warn-bg); color:var(--warn-text); border:1px solid var(--warn-line); }
+  .level.low { background:var(--surface-2); color:var(--text-2); border:1px solid var(--line-strong); }
+  @media (max-width:700px) { .rk { grid-template-columns:1fr; gap:var(--s2); } }
+  ul.clean { margin:0; padding:0; list-style:none; }
+  ul.clean li { padding:var(--s3) var(--s4); border-top:1px solid var(--line); font-size:14px; }
+  ul.clean li:first-child { border-top:0; }
+  ul.clean li b { display:block; font-size:14px; }
+  ul.clean li small { display:block; color:var(--text-2); font-size:13px; }
+  pre { margin:0; background:var(--g-800); color:hsl(220 20% 92%); border-radius:10px; padding:var(--s4) var(--s5); overflow-x:auto; font:12px/1.65 var(--mono); }
+  dl.words { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:0 var(--s5); margin:0; }
+  dl.words div { padding:var(--s2) 0; border-top:1px solid var(--line); font-size:14px; }
+  dl.words div:nth-child(-n+2) { border-top:0; }
+  dl.words dt { font-weight:700; display:inline; } dl.words dd { margin:0; display:inline; color:var(--text-2); }
+  dl.words dt::after { content:": "; font-weight:400; color:var(--text-3); }
+  @media (max-width:800px) { dl.words { grid-template-columns:1fr; } dl.words div:nth-child(2) { border-top:1px solid var(--line); } }
+  .foot { font-size:13px; color:var(--text-3); padding:0 var(--s2); }
+</style>
+</head>
+<body>
+<div class="page">
+<nav class="toc" aria-label="Sections"><strong>On this page</strong><a href="#big-picture">The big picture</a><a href="#one-request">One request</a><a href="#parts">The parts</a><a href="#data">Where the data lives</a><a href="#ranking">How results are ranked</a><a href="#history">What changed most</a><a href="#watch">Things to watch</a><a href="#decisions">Decisions behind it</a><a href="#questions">Open questions</a><a href="#run">How to run it</a><a href="#words">Words you will see</a></nav>
+<main>
+<div class="hero"><div class="top"><h1>Bookmark Atlas</h1><p class="lead">It saves your GitHub stars and X bookmarks on your own computer and lets you search them: from the terminal, from AI assistants, or from a palette inside the pi coding agent. One person wrote it in about three weeks, and it needs no outside libraries to run.</p><p class="howto">Green boxes explain in plain words. Grey text is the technical detail, with file references such as <span class="ref">cli.ts:136</span>. <span class="pill guess">Educated guess</span> marks anything the code did not confirm.</p></div><div class="stats" style="grid-template-columns:repeat(5,1fr)"><div class="stat"><b>21</b><span>code files</span></div><div class="stat"><b>6.3k</b><span>lines of TypeScript</span></div><div class="stat"><b>64</b><span>commits</span></div><div class="stat"><b>1</b><span>author</span></div><div class="stat"><b>84 MB</b><span>your database today</span></div></div></div><section class="panel" id="big-picture"><header><h2>The big picture</h2><p>One database file in the middle, three ways to ask it questions, and importers that fill it.</p></header><div class="body"><div class="plain"><b>In plain words</b>Think of a personal library. Your saved repos and posts are the books, the database is the shelf. You can ask the librarian by typing a command, through an AI assistant, or in the pi search palette. Importers fetch new books from GitHub and X.</div><figure class="figure"><div class="scroll"><svg id="arch" viewBox="0 0 1040 432" role="img" aria-label="Architecture diagram. Hover or focus a box to highlight what it connects to."><defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker><marker id="arr-on" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z"/></marker></defs><text class="lane-label" x="0" y="22">Who uses it</text><text class="lane-label" x="275" y="22">Ways in</text><text class="lane-label" x="550" y="22">What it does</text><text class="lane-label" x="825" y="22">Storage and outside world</text><path class="edge" data-from="you" data-to="cli" d="M215 76 C245 76 244 76 274 76"/><path class="edge" data-from="agent" data-to="mcp" d="M215 176 C245 176 244 176 274 176"/><path class="edge" data-from="pi" data-to="ext" d="M215 276 C245 276 244 276 274 276"/><path class="edge" data-from="browser" data-to="recv" d="M215 376 C245 376 244 376 274 376"/><path class="edge" data-from="cli" data-to="search" d="M490 69 C520 69 519 159 549 159"/><path class="edge" data-from="mcp" data-to="search" d="M490 176 C520 176 519 173 549 173"/><path class="edge" data-from="cli" data-to="imp" d="M490 83 C520 83 519 269 549 269"/><path class="edge" data-from="recv" data-to="imp" d="M490 376 C520 376 519 283 549 283"/><path class="edge dash" data-from="ext" data-to="db" d="M490 276 C610 276 704 126 824 126"/><path class="edge" data-from="search" data-to="db" d="M765 166 C795 166 794 112 824 112"/><path class="edge" data-from="imp" data-to="db" d="M765 262 C795 262 794 140 824 140"/><path class="edge" data-from="imp" data-to="gh" d="M765 276 C795 276 794 236 824 236"/><path class="edge" data-from="imp" data-to="txv" d="M765 290 C795 290 794 336 824 336"/><g class="node entry" data-id="you" tabindex="0" role="group" aria-label="You in the terminal"><rect x="0" y="44" width="215" height="64" rx="12"/><text class="t" x="16" y="72">You in the terminal</text><text class="s" x="16" y="92">bookmark-atlas ...</text></g><g class="node entry" data-id="agent" tabindex="0" role="group" aria-label="AI assistant"><rect x="0" y="144" width="215" height="64" rx="12"/><text class="t" x="16" y="172">AI assistant</text><text class="s" x="16" y="192">Claude, Codex</text></g><g class="node entry" data-id="pi" tabindex="0" role="group" aria-label="pi coding agent"><rect x="0" y="244" width="215" height="64" rx="12"/><text class="t" x="16" y="272">pi coding agent</text><text class="s" x="16" y="292">/bookmarks, /consult</text></g><g class="node entry" data-id="browser" tabindex="0" role="group" aria-label="Browser on x.com"><rect x="0" y="344" width="215" height="64" rx="12"/><text class="t" x="16" y="372">Browser on x.com</text><text class="s" x="16" y="392">sends saved posts</text></g><g class="node door" data-id="cli" tabindex="0" role="group" aria-label="Command line"><rect x="275" y="44" width="215" height="64" rx="12"/><text class="t" x="291" y="72">Command line</text><text class="s" x="291" y="92">src/cli.ts</text></g><g class="node door" data-id="mcp" tabindex="0" role="group" aria-label="MCP server"><rect x="275" y="144" width="215" height="64" rx="12"/><text class="t" x="291" y="172">MCP server</text><text class="s" x="291" y="192">src/mcp.ts</text></g><g class="node door" data-id="ext" tabindex="0" role="group" aria-label="Palette extension"><rect x="275" y="244" width="215" height="64" rx="12"/><text class="t" x="291" y="272">Palette extension</text><text class="s" x="291" y="292">extensions/.../index.ts</text></g><g class="node door" data-id="recv" tabindex="0" role="group" aria-label="Capture receiver"><rect x="275" y="344" width="215" height="64" rx="12"/><text class="t" x="291" y="372">Capture receiver</text><text class="s" x="291" y="392">src/receiver.ts</text></g><g class="node core" data-id="search" tabindex="0" role="group" aria-label="Search and recall"><rect x="550" y="134" width="215" height="64" rx="12"/><text class="t" x="566" y="162">Search and recall</text><text class="s" x="566" y="182">search, recall, stage</text></g><g class="node core" data-id="imp" tabindex="0" role="group" aria-label="Importers"><rect x="550" y="234" width="215" height="84" rx="12"/><text class="t" x="566" y="262">Importers</text><text class="s" x="566" y="282">github, x, enrich,</text><text class="s" x="566" y="300">collector</text></g><g class="node store" data-id="db" tabindex="0" role="group" aria-label="SQLite database"><rect x="825" y="84" width="215" height="84" rx="12"/><text class="t" x="841" y="112">SQLite database</text><text class="s" x="841" y="132">bookmarks.db</text><text class="s" x="841" y="150">in your user folder</text></g><g class="node outside" data-id="gh" tabindex="0" role="group" aria-label="GitHub"><rect x="825" y="204" width="215" height="64" rx="12"/><text class="t" x="841" y="232">GitHub</text><text class="s" x="841" y="252">stars and READMEs</text></g><g class="node outside" data-id="txv" tabindex="0" role="group" aria-label="tweetxvault"><rect x="825" y="304" width="215" height="64" rx="12"/><text class="t" x="841" y="332">tweetxvault</text><text class="s" x="841" y="352">separate tool for X</text></g></svg></div><figcaption>Hover or tab to a box to highlight what it talks to. The dashed line means the palette reads the database directly, read-only. The palette runs the CLI as a separate process and shares no code with <code>src/</code>; a test <span class="ref">test/parity.test.ts</span> keeps their behaviour in step. <span class="ref">index.ts:315</span></figcaption></figure></div></section><section class="panel" id="one-request"><header><h2>One request, step by step</h2><p>What happens when you ask: &quot;Is there anything I saved that fits what I am building?&quot;</p></header><div class="body"><div class="plain"><b>In plain words</b>The tool does not only search for your words. It also looks at what you are working on right now (git branch, recent changes, the libraries you use) and uses that to pick the best matches.</div><div class="cols"><ol class="steps"><li><b>You run the recall command.</b><span>The command line recognises it and starts. <span class="ref">cli.ts:136</span></span></li><li><b>It opens your database.</b><span>One file in your user folder, closed again at the end. <span class="ref">cli.ts:78</span></span></li><li><b>It reads your git state.</b><span>Branch, last 12 commit messages, up to 20 changed files. <span class="ref">stage.ts:11-56</span></span></li><li><b>It reads your package files.</b><span>This shows which libraries you use. <span class="ref">recall.ts:114</span></span></li></ol><ol class="steps" style="counter-reset:step 4"><li><b>It searches six ways and merges the lists.</b><span>Task and project context, each against titles, full text and passages. <span class="ref">recall.ts:538-546</span></span></li><li><b>It drops weak matches and adds bonuses.</b><span>A match on one of your libraries earns a lot. <span class="ref">recall.ts:568-657</span></span></li><li><b>It prints the best matches with reasons.</b><span>Up to 25 results, default 5, as JSON. <span class="ref">cli.ts:151-161</span></span></li></ol></div><p class="tech" style="margin-top:var(--s4)">The call order inside <code>recall()</code> comes from an exploration report on <span class="ref">recall.ts:496-683</span>, not from a line-by-line trace. <span class="pill guess">Educated guess</span> for the exact order inside that function.</p></div></section><section class="panel" id="parts"><header><h2>The parts</h2><p>One file per job. Line counts are under each name.</p></header><table class="t"><thead><tr><th>Part</th><th>What it does, in plain words</th><th class="hide-s">Technical detail</th></tr></thead><tbody><tr class="grp"><td colspan="3">Doors in: how a request or new data arrives</td></tr><tr><td class="n">src/cli.ts<small>283 lines</small></td><td class="w">The main switchboard. You type a command, it picks the right helper.</td><td class="h hide-s">One chain of <code>if</code> checks over 13 commands. <span class="ref">cli.ts:70-265</span></td></tr><tr><td class="n">src/mcp.ts<small>159 lines</small></td><td class="w">Lets AI assistants search your bookmarks. Four tools, all read-only.</td><td class="h hide-s">JSON over standard input and output: search_bookmarks, get_bookmark, suggest_for_task, related_bookmarks. <span class="ref">mcp.ts:42-158</span></td></tr><tr><td class="n">extensions/bookmark-atlas/index.ts<small>1334 lines, the biggest file</small></td><td class="w">The search palette in the pi agent: <code>/bookmarks</code> to browse, <code>/consult</code> for suggestions.</td><td class="h hide-s">Runs the CLI for refresh, notes, related and recall. Opens the database read-only. <span class="ref">index.ts:1227-1291</span></td></tr><tr><td class="n">src/receiver.ts<small>113 lines</small></td><td class="w">A tiny web server only your own computer can reach. A browser helper sends saved X posts to it.</td><td class="h hide-s">127.0.0.1:41009, secret token, accepts x.com and twitter.com, 8 MiB limit. <span class="ref">receiver.ts:6-104</span></td></tr><tr class="grp"><td colspan="3">Answering questions</td></tr><tr><td class="n">src/search.ts<small>263 lines</small></td><td class="w">Plain word search. Matches in the title count most.</td><td class="h hide-s">FTS5 with bm25 weights. <span class="ref">search.ts:101-143</span></td></tr><tr><td class="n">src/recall.ts<small>683 lines</small></td><td class="w">The clever part. Suggests bookmarks that fit your current project.</td><td class="h hide-s">Reads manifests, merges six ranked lists, filters, adds bonuses. Also finds related items. <span class="ref">recall.ts:496-683</span></td></tr><tr><td class="n">src/stage.ts<small>58 lines</small></td><td class="w">Describes what you are working on, using git.</td><td class="h hide-s">Branch, last 12 commits, up to 20 files. No database access. <span class="ref">stage.ts:11-56</span></td></tr><tr class="grp"><td colspan="3">Bringing data in</td></tr><tr><td class="n">src/github.ts<small>370 lines</small></td><td class="w">Fetches your starred repositories from GitHub.</td><td class="h hide-s">Token from env or <code>gh auth token</code>, 100 per page, ETag for &quot;nothing changed&quot;. <span class="ref">github.ts:52-262</span></td></tr><tr><td class="n">src/enrich.ts<small>224 lines</small></td><td class="w">Downloads each repo's README so search can find words inside it.</td><td class="h hide-s">Up to 8 workers (default 4), 25 repos per run, size cap. <span class="ref">enrich.ts:90-215</span></td></tr><tr><td class="n">src/x.ts<small>726 lines</small></td><td class="w">Understands X bookmark files and stores posts, media and text.</td><td class="h hide-s">Siftly, X API v2 and TweetXVault formats. Skips broken entries. <span class="ref">x.ts:447-721</span></td></tr><tr><td class="n">src/collector.ts<small>61 lines</small></td><td class="w">Runs the separate <code>tweetxvault</code> tool, then imports what it exported.</td><td class="h hide-s">Temporary export folder, removed afterwards. <span class="ref">collector.ts:41-59</span></td></tr><tr class="grp"><td colspan="3">Storage</td></tr><tr><td class="n">src/db.ts<small>428 lines</small></td><td class="w">Opens the database, creates and upgrades its tables, decides where the file lives.</td><td class="h hide-s">SQLite, write-ahead log, foreign keys, 5 s busy timeout. <span class="ref">db.ts:15-428</span></td></tr></tbody></table></section><section class="panel" id="data"><header><h2>Where the data lives</h2><p>One SQLite file: <code>~/Library/Application Support/bookmark-atlas/bookmarks.db</code>, about 84 MB.</p></header><div class="body"><div class="plain"><b>In plain words</b>Every saved item is a &quot;resource&quot;. Around it hang the details: when you saved it, your notes, the downloaded text, and for X posts the media. Removing a bookmark deletes nothing at first. The save is only marked as removed, and the <code>prune</code> command later cleans up orphans.</div><div class="cards"><div class="card dark"><h4>The core</h4><p>One row per saved item, repo or post.</p><p class="tech"><code>resources</code>, <code>github_repositories</code>, <code>x_posts</code>, <code>x_media</code> <span class="ref">db.ts:39-96</span></p></div><div class="card"><h4>Who saved what</h4><p>Your accounts, each save (with &quot;removed&quot;), sync history.</p><p class="tech"><code>integrations</code>, <code>saves</code>, <code>sync_checkpoints</code>, <code>sync_runs</code> <span class="ref">db.ts:29-139</span></p></div><div class="card"><h4>Text to search</h4><p>Downloaded text in passages, plus two search indexes.</p><p class="tech"><code>captures</code>, <code>chunks</code>, <code>resources_fts</code>, <code>chunks_fts</code> <span class="ref">db.ts:139-291</span></p></div><div class="card"><h4>Your notes</h4><p>Why a bookmark matters. Searchable, ranks highly.</p><p class="tech"><code>resource_notes</code>, <code>resource_fetch_state</code> <span class="ref">db.ts:160-177</span></p></div></div><p class="tech" style="margin-top:var(--s4)">File location, in order: <code>BOOKMARK_ATLAS_DB</code>, then <code>BOOKMARK_ATLAS_DATA_DIR</code>, then your user folder. No override is set on this machine. <span class="ref">db.ts:413-428</span> The search indexes use a stemmer and ignore accents, so &quot;running&quot; finds &quot;run&quot;. <span class="ref">db.ts:177</span></p></div></section><section class="panel" id="ranking"><header><h2>How results are ranked</h2><p>Two recipes: a plain word search and the project-aware recall.</p></header><div class="body"><div class="plain"><b>In plain words</b><em>Search</em> splits your words, drops filler like &quot;the&quot; and finds bookmarks containing any of them, with title matches counting most. <em>Recall</em> asks the same question six ways (your task, plus context from your project), merges the lists, gives a big bonus to bookmarks that mention a library you use, and throws weak matches out.</div><div class="cols"><div class="sub-panel"><h3>Search: how much each place counts</h3><table class="t flush"><tbody><tr><td>Title</td><td class="num">10</td></tr><tr><td>Description</td><td class="num">5</td></tr><tr><td>Topics</td><td class="num">3</td></tr><tr><td>Saved text</td><td class="num">2</td></tr><tr><td>Language</td><td class="num">1</td></tr></tbody></table><div class="in tech">Scored with bm25, newest save breaks ties, default limit 10, no minimum score. <span class="ref">search.ts:77-142</span></div></div><div class="sub-panel"><h3>Recall: the ingredients</h3><table class="t flush"><tbody><tr><td>Your task words</td><td class="num">x1.0 to x1.5</td></tr><tr><td>Project context (git stage)</td><td class="num">x0.3 to x0.45</td></tr><tr><td>Each library you use that the bookmark mentions</td><td class="num">+14</td></tr><tr><td>Same programming language</td><td class="num">+4</td></tr><tr><td>Full text was downloaded</td><td class="num">+2</td></tr><tr><td>Recently saved (fades over three years)</td><td class="num">up to +3</td></tr><tr><td>Archived repository</td><td class="num">-6</td></tr></tbody></table><div class="in tech">Six lists merged with Reciprocal Rank Fusion. A match must cover 35% of the task weight and 30% in total unless a library matches. Only still-saved items count. <span class="ref">recall.ts:31, 60-64, 261, 538-657</span></div></div></div></div></section><section class="panel" id="history"><header><h2>What changed most</h2><p>Git history from 3 to 23 September 2026.</p></header><div class="body"><div class="plain"><b>In plain words</b>The docs change more than any code file, which is normal for a young tool. The palette extension is the code file that moves most and also the biggest, so surprises are most likely there. All 64 commits are from one person, and about 70% came in a single week.</div><div class="cols"><div class="sub-panel"><h3>Commits per file</h3><div class="in"><div class="bars"><div class="l">README.md</div><div class="b docs" style="width:100.0%"></div><div class="n">44</div><div class="l">extensions/.../index.ts</div><div class="b" style="width:47.7%"></div><div class="n">21</div><div class="l">src/cli.ts</div><div class="b" style="width:45.5%"></div><div class="n">20</div><div class="l">test/palette.test.ts</div><div class="b test" style="width:27.3%"></div><div class="n">12</div><div class="l">package.json</div><div class="b docs" style="width:25.0%"></div><div class="n">11</div><div class="l">src/db.ts</div><div class="b" style="width:22.7%"></div><div class="n">10</div><div class="l">src/recall.ts</div><div class="b" style="width:18.2%"></div><div class="n">8</div><div class="l">src/x.ts</div><div class="b" style="width:15.9%"></div><div class="n">7</div></div><div class="legend"><span><i style="background:var(--accent)"></i>source code</span><span><i style="background:var(--a-300)"></i>tests</span><span><i style="background:var(--g-400)"></i>docs and config</span></div></div></div><div class="sub-panel"><h3>Commits per week</h3><div class="in"><div class="weeks" role="img" aria-label="Commits per week: week 36 19, week 37 0, week 38 0, week 39 45"><div class="w"><b>19</b><div class="col" style="height:42%"></div><span>week 36</span></div><div class="w"><b>0</b><div class="col zero" style=""></div><span>week 37</span></div><div class="w"><b>0</b><div class="col zero" style=""></div><span>week 38</span></div><div class="w"><b>45</b><div class="col" style="height:100%"></div><span>week 39</span></div></div><p class="tech" style="margin-top:var(--s3)">Changed together most: README with the extension (19 times), README with <code>cli.ts</code> (15), extension with its test (12). On 22 and 23 September a semantic-search stack was removed (commits <code>a228cda</code>, <code>cf9285c</code>).</p></div></div></div></div></section><section class="panel" id="watch"><header><h2>Things to watch</h2><p>Nothing here is broken. These are the places where a surprise is most likely.</p></header><div class="body" style="padding-bottom:0"><div class="plain"><b>In plain words</b>The most useful finding: <code>search</code> and <code>recall</code> disagree about bookmarks you removed. After that come a few missing safety nets: no retries when GitHub is slow, and no tests for the main switchboard and the browser receiver.</div></div><div><div class="rk"><span class="level med">Worth a look</span><div><b>Search still shows bookmarks you removed</b><p>A removed bookmark is only marked as removed. <code>recall</code> skips it, <code>search</code> returns it. The same question gives different answers.</p><div class="tech"><span class="ref">recall.ts:234, 261, 280, 426</span> filter removed saves. In <span class="ref">search.ts:125</span> the marker only changes the date shown. <span class="pill read">Read in code</span> and confirmed by a second reviewer.</div></div></div><div class="rk"><span class="level med">Worth a look</span><div><b>GitHub sync stops at the first hiccup</b><p>If GitHub says &quot;slow down&quot; or the network drops once, the sync stops and you start it again. The tool never waits and retries.</p><div class="tech">Any non-OK answer throws. No retry or rate-limit handling in <code>github.ts</code>, <code>enrich.ts</code>, <code>collector.ts</code>. <span class="ref">github.ts:270-271</span> <span class="pill read">Read in code</span></div></div></div><div class="rk"><span class="level med">Worth a look</span><div><b>The switchboard and the browser receiver have no tests of their own</b><p>No test loads <code>cli.ts</code>, <code>collector.ts</code>, <code>receiver.ts</code> or <code>stage.ts</code> directly. The receiver is the only part that listens on a network port. Indirect coverage is unknown.</p><div class="tech">Checked by searching imports in <code>test/</code>. <span class="pill read">Read in code</span></div></div></div><div class="rk"><span class="level low">Good to know</span><div><b>The database has no version number</b><p>Each time it opens, the database checks what is missing and fixes it. That works, but nothing records which upgrades ran, and some rebuild the search index on open.</p><div class="tech"><code>schema_meta</code> exists but nothing reads it. <span class="ref">db.ts:24, 191-295</span> <span class="pill read">Read in code</span></div></div></div><div class="rk"><span class="level low">Good to know</span><div><b>One 1334-line file holds the palette, and one function exists twice</b><p>The data-folder function is copied into the extension on purpose, because a symlinked extension cannot import shared code. A test fails if the copies drift apart.</p><div class="tech"><span class="ref">docs/details.md:21-27</span> <span class="ref">test/db.test.ts</span> <span class="pill read">Read in code</span></div></div></div><div class="rk"><span class="level low">Good to know</span><div><b>Your X login lives in another tool, and AI clients can read your bookmark text</b><p><code>tweetxvault</code> handles X access, and we could not see where it stores your session. Any AI you connect through MCP can read bookmark text; the tool tells it to treat that text as untrusted.</p><div class="tech"><span class="ref">collector.ts:42-56</span> <span class="ref">mcp.ts:127-141</span> <span class="pill read">Read in code</span> for both facts, <span class="pill guess">Educated guess</span> for where the data goes next.</div></div></div><div class="rk"><span class="level low">Minor</span><div><b>Small leftovers</b><p>The contributing guide says 69 tests, the code has 76. A compiled helper <code>macos-embed</code> still sits in your data folder from a removed feature.</p><div class="tech"><span class="ref">CONTRIBUTING.md:25</span> <span class="pill read">Read in code</span> for the count, <span class="pill guess">Educated guess</span> for the leftover.</div></div></div></div></section><div class="two"><section class="panel" id="decisions"><header><h2>Decisions behind it</h2><p>Choices the code makes. The author has not confirmed them.</p></header><ul class="clean"><li><b>No outside libraries at run time.</b><small>Only dev tools and optional pi packages are listed. <span class="pill guess">Educated guess</span></small></li><li><b>Database in your user folder, not the repo.</b><small>Earlier versions wrote it into the working folder and programs disagreed. <span class="ref">docs/details.md:7-18</span></small></li><li><b>Ship compiled JavaScript.</b><small>Node refuses to run TypeScript inside <code>node_modules</code>. <span class="ref">README.md:59</span></small></li><li><b>Copy one function and guard it with a test.</b><small><span class="ref">docs/details.md:21-27</span></small></li><li><b>Treat saved text as untrusted.</b><small><span class="ref">mcp.ts:141</span> <span class="pill guess">Educated guess</span></small></li><li><b>Word search plus rank merging, no AI embeddings.</b><small>Embeddings were removed on 22 and 23 September. <span class="ref">cf9285c</span> <span class="pill guess">Educated guess</span></small></li><li><b>Release through version tags with signed provenance.</b><small><span class="ref">release.yml:36-107</span></small></li></ul></section><section class="panel" id="questions"><header><h2>Open questions</h2><p>Things the code alone could not answer.</p></header><ul class="clean"><li>Where does <code>tweetxvault</code> keep your X session, and what does it send to X?</li><li>Is it on purpose that <code>search</code> returns removed bookmarks?</li><li>Is <code>schema_meta</code> a planned version table or a leftover?</li><li>What does <code>DISTINCTIVE_TERM_RATIO</code> control? <span class="ref">recall.ts:40</span></li><li>What is <code>pi-warden.md</code> for? It is git-ignored and was not read.</li><li>Do other tests reach <code>cli.ts</code>, <code>collector.ts</code>, <code>receiver.ts</code> and <code>stage.ts</code> indirectly?</li><li>Can the leftover <code>macos-embed</code> file in the data folder be deleted?</li></ul></section></div><section class="panel" id="run"><header><h2>How to run it</h2><p>Commands come from <code>package.json</code>. We did not run them.</p></header><div class="body"><div class="plain"><b>In plain words</b>You need Node.js 24 or newer. From a checkout, use <code>node src/cli.ts</code> instead of the installed command. The only secret you must set is the token for the browser receiver. GitHub access reuses your <code>gh</code> login if no token is set.</div><pre><code># from a checkout                          # settings (environment variables)
+node src/cli.ts status                     BOOKMARK_ATLAS_DB, BOOKMARK_ATLAS_DATA_DIR   where the database lives
+npm test            # node --test          BOOKMARK_ATLAS_GITHUB_TOKEN or GH_TOKEN      else: gh auth token
+npm run typecheck   # tsc --noEmit         BOOKMARK_ATLAS_X_CAPTURE_TOKEN               needed for &quot;capture x&quot;
+npm run build       # writes dist/         BOOKMARK_ATLAS_TWEETXVAULT_BIN, _DIR         the tweetxvault tool
+
+# installed package
+bookmark-atlas recall &quot;task&quot; --repo &quot;$PWD&quot;</code></pre><p class="tech" style="margin-top:var(--s3)">CI runs type check and tests on Ubuntu and macOS, then checks the package contents. A tag starting with <code>v</code> publishes to npm. <span class="ref">ci.yml</span> <span class="ref">release.yml</span></p></div></section><section class="panel" id="words"><header><h2>Words you will see</h2><p>Short plain definitions.</p></header><div class="body"><dl class="words"><div><dt>Resource</dt><dd>One saved item: a GitHub repo or an X post.</dd></div><div><dt>Save</dt><dd>The link between you and a resource. Removing it only marks it.</dd></div><div><dt>Capture, chunk</dt><dd>Downloaded text of a resource, and the passages it is cut into.</dd></div><div><dt>Recall, consult</dt><dd>Ask for saved items that fit your task and project.</dd></div><div><dt>Stage</dt><dd>A short description of your current work, built from git.</dd></div><div><dt>MCP</dt><dd>Model Context Protocol, a standard for AI assistants to call tools.</dd></div><div><dt>pi</dt><dd>The coding agent that hosts the palette extension.</dd></div><div><dt>TweetXVault</dt><dd>A separate tool that downloads your X bookmarks.</dd></div><div><dt>FTS5</dt><dd>SQLite's built-in word search.</dd></div><div><dt>bm25</dt><dd>A standard formula that scores how well a text matches your words.</dd></div><div><dt>Rank fusion (RRF)</dt><dd>A way to merge several ranked lists into one fair list.</dd></div><div><dt>ETag</dt><dd>A stamp that lets GitHub answer &quot;nothing changed&quot;.</dd></div><div><dt>Provenance</dt><dd>A signed npm record showing which build made a package.</dd></div></dl></div></section><p class="foot">How we checked this: four explorers read the code in parallel, then an independent reviewer checked 15 claims. All 15 were correct, and one detail plus four wordings were fixed. Not re-checked: the 84 MB size (checked in the shell) and &quot;the palette opens the database read-only&quot; (from the README and an explorer report). Generated on 5 October 2026 by <code>/explore-codebase</code>, repository state: 64 commits, last on 23 September 2026, version 0.1.1. A reading tour is in <code>TOUR.md</code>, agent notes in <code>AGENTS.md</code>.</p>
+</main>
+</div>
+<script>
+  // Highlight the current section in the side navigation.
+  (function () {
+    var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+    var byId = {}; links.forEach(function (a) { byId[a.getAttribute('href').slice(1)] = a; });
+    if (!('IntersectionObserver' in window)) return;
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (!e.isIntersecting) return;
+        links.forEach(function (l) { l.removeAttribute('aria-current'); });
+        if (byId[e.target.id]) byId[e.target.id].setAttribute('aria-current', 'true');
+      });
+    }, { rootMargin: '-15% 0px -75% 0px' });
+    document.querySelectorAll('main section[id]').forEach(function (s) { io.observe(s); });
+  })();
+
+  // Highlight the connections of a diagram box on hover or keyboard focus.
+  (function () {
+    var svg = document.getElementById('arch'); if (!svg) return;
+    var nodes = Array.prototype.slice.call(svg.querySelectorAll('.node'));
+    var edges = Array.prototype.slice.call(svg.querySelectorAll('.edge'));
+    function focusNode(id) {
+      svg.classList.add('has-focus');
+      var linked = {}; linked[id] = true;
+      edges.forEach(function (e) {
+        var on = e.dataset.from === id || e.dataset.to === id;
+        e.classList.toggle('on', on);
+        if (on) { linked[e.dataset.from] = true; linked[e.dataset.to] = true; }
+      });
+      nodes.forEach(function (n) { n.classList.toggle('on', !!linked[n.dataset.id]); });
+    }
+    function clear() {
+      svg.classList.remove('has-focus');
+      edges.forEach(function (e) { e.classList.remove('on'); });
+      nodes.forEach(function (n) { n.classList.remove('on'); });
+    }
+    nodes.forEach(function (n) {
+      n.addEventListener('mouseenter', function () { focusNode(n.dataset.id); });
+      n.addEventListener('mouseleave', clear);
+      n.addEventListener('focus', function () { focusNode(n.dataset.id); });
+      n.addEventListener('blur', clear);
+    });
+  })();
+</script>
+</body>
+</html>

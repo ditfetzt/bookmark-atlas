@@ -4,6 +4,38 @@ Notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-10-05
+
+Bookmark Atlas now reads your browser bookmarks. Chrome, Brave, Edge, Chromium, Vivaldi,
+Arc, Opera, Firefox and Safari are read from the files they already keep on disk — no export,
+no extension, no account. A browser bookmark becomes an ordinary resource next to your stars
+and posts, so the same search, the same recall ranking, and the same palette reach it.
+
+### Highlights
+
+- **Three readers cover every browser here.** Every Chromium browser writes the same `Bookmarks` file, so one reader handles Chrome, Brave, Edge, Chromium, Vivaldi, Arc, Opera and the Ego Browser at once. Safari and Firefox each needed their own — and Firefox turned out to be the cheapest of the three, because it already keeps its bookmarks in SQLite, which this project already uses.
+- **A browser bookmark is not a second-class row.** It lands in the same three tables as a star or a post: an integration per browser profile, a resource per page, a save per bookmark. The folder, the save date, and the browser and profile it came from ride along in metadata. No new table, no new query path, no schema change.
+- **The same page saved twice is one bookmark.** Canonicalisation strips tracking parameters, so a link bookmarked in Brave and again in Ego resolves to a single resource with two saves. A page that is both a starred repository and a bookmark resolves to one resource too, which is the difference between an atlas and four lists.
+- **Your browser stays the source of truth.** Delete a bookmark and the next sync marks it removed. `prune` is what actually deletes, and it takes `--dry-run`.
+
+### Added
+
+- `sync browsers`, reading the Chromium family, Safari and Firefox, with `--browser` and `--profile` to narrow the run.
+- `browsers`, which lists every source found and reports per-source read errors — the answer to "why is Safari empty?" without a stack trace.
+- A **Browsers** filter in the palette: `tab` now cycles All → GitHub → X → Browsers.
+- Browser bookmarks are indexed as `web_page` resources, so full-text search, `recall` and `related` reach them like anything else.
+- Folders are recorded per save, next to the browser and profile the bookmark came from.
+
+### Changed
+
+- `sync browsers` is safe to re-run: a second pass updates rather than re-imports, and reports the two counts separately.
+- Only `http` and `https` bookmarks are imported. `javascript:`, `chrome://` and `file://` entries are counted and skipped rather than stored as rows nothing can search or fetch.
+
+### Notes
+
+- **Safari needs Full Disk Access.** macOS protects `~/Library/Safari`, so the terminal running the sync has to be granted it in System Settings → Privacy & Security. Without it the sync reports the error for that one source and leaves every existing Safari bookmark untouched, rather than reading a blocked file as "you deleted everything".
+- `--limit` imports a prefix of each source and deliberately skips deletion detection, because bookmarks that were not read are not bookmarks that went away.
+
 ## [0.1.1] - 2026-09-24
 
 Installing Bookmark Atlas no longer drags the pi coding agent's dependency tree along with
@@ -61,5 +93,6 @@ dependency — Node's standard library and its built-in SQLite only.
 - `--help` no longer advertises a `use` command that was removed with usage tracking.
 - `--help` prints the database path it will actually use, instead of a hardcoded string that had gone stale.
 
+[0.2.0]: https://github.com/ditfetzt/bookmark-atlas/releases/tag/v0.2.0
 [0.1.1]: https://github.com/ditfetzt/bookmark-atlas/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ditfetzt/bookmark-atlas/releases/tag/v0.1.0

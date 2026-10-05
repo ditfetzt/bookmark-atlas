@@ -134,10 +134,15 @@ type Bookmark = {
 };
 
 /** Which source a bookmark came from. */
-type SourceFilter = "all" | "github" | "x";
+type SourceFilter = "all" | "github" | "x" | "browsers";
 
-function sourceOf(bookmark: Bookmark): "github" | "x" {
-	return bookmark.type === "x_post" ? "x" : "github";
+function sourceOf(bookmark: Bookmark): "github" | "x" | "browsers" {
+	if (bookmark.type === "x_post") return "x";
+	// Only a page saved from a browser is a browser bookmark. Everything else
+	// keeps the meaning it already had, so an unknown type is never counted as
+	// one of the hundreds of browser rows.
+	if (bookmark.type === "web_page") return "browsers";
+	return "github";
 }
 
 /**
@@ -523,14 +528,19 @@ export class BookmarkPalette implements Component, Focusable {
 		this.selected = 0;
 	}
 
-	private sourceCounts(): { all: number; github: number; x: number } {
+	private sourceCounts(): { all: number; github: number; x: number; browsers: number } {
 		let github = 0;
-		for (const bookmark of this.items) if (sourceOf(bookmark) === "github") github += 1;
-		return { all: this.items.length, github, x: this.items.length - github };
+		let x = 0;
+		for (const bookmark of this.items) {
+			const source = sourceOf(bookmark);
+			if (source === "github") github += 1;
+			else if (source === "x") x += 1;
+		}
+		return { all: this.items.length, github, x, browsers: this.items.length - github - x };
 	}
 
 	private cycleSource(step: number): void {
-		const order: SourceFilter[] = ["all", "github", "x"];
+		const order: SourceFilter[] = ["all", "github", "x", "browsers"];
 		const index = order.indexOf(this.sourceFilter);
 		this.sourceFilter = order[(index + step + order.length) % order.length] ?? "all";
 		this.filtered = this.applyFilter(this.input.getValue());
@@ -1005,7 +1015,7 @@ export class BookmarkPalette implements Component, Focusable {
 			key("Cmd+↑ / Cmd+↓", "ten rows, where the terminal forwards Cmd"),
 			"",
 			theme.fg("accent", "Filter"),
-			key("tab / shift+tab", "All → GitHub → X"),
+			key("tab / shift+tab", "All → GitHub → X → Browsers"),
 			key("ctrl+a", "hide archived repositories"),
 			key("ctrl+d", "only what was added in the last 7 days"),
 			key("ctrl+t", "filter by topic"),
@@ -1088,6 +1098,7 @@ export class BookmarkPalette implements Component, Focusable {
 				chip("All", "all", counts.all) +
 					chip("GitHub", "github", counts.github) +
 					chip("X", "x", counts.x) +
+					chip("Browsers", "browsers", counts.browsers) +
 					toggle("hide archived", this.hideArchived) +
 					toggle(`recent ${RECENT_DAYS}d`, this.recentOnly) +
 					(this.topic ? toggle(`#${this.topic}`, true) : "") +

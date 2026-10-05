@@ -10,6 +10,7 @@ const PAGE_UP = "\x1b[5~";
 const PAGE_DOWN = "\x1b[6~";
 const CMD_UP = "\x1b[1;9A";
 const CMD_DOWN = "\x1b[1;9B";
+const TAB = "\t";
 
 type Harness = {
   handleInput(data: string): void;
@@ -33,6 +34,8 @@ type Harness = {
 
 type ItemSeed = {
   title: string;
+  /** Defaults to a GitHub repository; "web_page" is a browser bookmark. */
+  type?: string;
   archived?: number;
   topics?: string[];
   savedAt?: string;
@@ -45,7 +48,7 @@ function paletteItems(seeds: ItemSeed[], options: Record<string, unknown> = {}):
     id: index + 1,
     title: seed.title,
     url: `https://example.com/${index + 1}`,
-    type: "github_repo",
+    type: seed.type ?? "github_repo",
     savedAt: seed.savedAt ?? "2024-01-01",
     archived: seed.archived ?? 0,
     stars: seed.stars ?? null,
@@ -325,6 +328,34 @@ test("the recent filter keeps only bookmarks inside the window", () => {
   ]);
   list.handleInput(CTRL_D);
   assert.deepEqual(list.filtered.map((bookmark) => bookmark.title), ["fresh"]);
+});
+
+test("the tab filter cycles through GitHub, X and browser bookmarks", () => {
+  const list = paletteItems([
+    { title: "repo", type: "github_repository" },
+    { title: "post", type: "x_post" },
+    { title: "page", type: "web_page" },
+  ]);
+  const titles = (): string[] => list.filtered.map((bookmark) => bookmark.title);
+
+  assert.equal(list.filtered.length, 3, "every source shows under All");
+
+  list.handleInput(TAB);
+  assert.deepEqual(titles(), ["repo"]);
+  list.handleInput(TAB);
+  assert.deepEqual(titles(), ["post"]);
+  list.handleInput(TAB);
+  assert.deepEqual(titles(), ["page"], "browser bookmarks get their own filter");
+  list.handleInput(TAB);
+  assert.equal(list.filtered.length, 3, "and it wraps back to All");
+});
+
+test("a type the palette does not know is not counted as a browser bookmark", () => {
+  // The database writes "github_repository"; an older or unknown value must not
+  // fall into the browser bucket, which holds hundreds of rows.
+  const list = paletteItems([{ title: "legacy", type: "github_repo" }]);
+  list.handleInput(TAB);
+  assert.deepEqual(list.filtered.map((bookmark) => bookmark.title), ["legacy"]);
 });
 
 test("the topic picker ranks topics and filters by the chosen one", () => {

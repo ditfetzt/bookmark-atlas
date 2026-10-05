@@ -1,0 +1,167 @@
+{
+  "title": "Bookmark Atlas",
+  "lang": "en",
+  "hero": {
+    "lead": "It saves your GitHub stars and X bookmarks on your own computer and lets you search them: from the terminal, from AI assistants, or from a palette inside the pi coding agent. One person wrote it in about three weeks, and it needs no outside libraries to run.",
+    "exampleRef": "cli.ts:136",
+    "stats": [["21", "code files"], ["6.3k", "lines of TypeScript"], ["64", "commits"], ["1", "author"], ["84 MB", "your database today"]]
+  },
+  "sections": [
+    {
+      "type": "diagram", "id": "big-picture", "title": "The big picture", "nav": "The big picture",
+      "sub": "One database file in the middle, three ways to ask it questions, and importers that fill it.",
+      "plain": "Think of a personal library. Your saved repos and posts are the books, the database is the shelf. You can ask the librarian by typing a command, through an AI assistant, or in the pi search palette. Importers fetch new books from GitHub and X.",
+      "lanes": ["Who uses it", "Ways in", "What it does", "Storage and outside world"],
+      "nodes": [
+        {"id": "you", "lane": 0, "title": "You in the terminal", "sub": "bookmark-atlas ..."},
+        {"id": "agent", "lane": 0, "title": "AI assistant", "sub": "Claude, Codex"},
+        {"id": "pi", "lane": 0, "title": "pi coding agent", "sub": "/bookmarks, /consult"},
+        {"id": "browser", "lane": 0, "title": "Browser on x.com", "sub": "sends saved posts"},
+        {"id": "cli", "lane": 1, "title": "Command line", "sub": "src/cli.ts"},
+        {"id": "mcp", "lane": 1, "title": "MCP server", "sub": "src/mcp.ts"},
+        {"id": "ext", "lane": 1, "title": "Palette extension", "sub": "extensions/.../index.ts"},
+        {"id": "recv", "lane": 1, "title": "Capture receiver", "sub": "src/receiver.ts"},
+        {"id": "search", "lane": 2, "title": "Search and recall", "sub": "search, recall, stage"},
+        {"id": "imp", "lane": 2, "title": "Importers", "sub": ["github, x, enrich,", "collector"]},
+        {"id": "db", "lane": 3, "kind": "store", "title": "SQLite database", "sub": ["bookmarks.db", "in your user folder"]},
+        {"id": "gh", "lane": 3, "kind": "outside", "title": "GitHub", "sub": "stars and READMEs"},
+        {"id": "txv", "lane": 3, "kind": "outside", "title": "tweetxvault", "sub": "separate tool for X"}
+      ],
+      "edges": [
+        {"from": "you", "to": "cli"}, {"from": "agent", "to": "mcp"}, {"from": "pi", "to": "ext"}, {"from": "browser", "to": "recv"},
+        {"from": "cli", "to": "search"}, {"from": "mcp", "to": "search"}, {"from": "cli", "to": "imp"}, {"from": "recv", "to": "imp"},
+        {"from": "ext", "to": "db", "dash": true},
+        {"from": "search", "to": "db"}, {"from": "imp", "to": "db"}, {"from": "imp", "to": "gh"}, {"from": "imp", "to": "txv"}
+      ],
+      "caption": "Hover or tab to a box to highlight what it talks to. The dashed line means the palette reads the database directly, read-only. The palette runs the CLI as a separate process and shares no code with `src/`; a test [ref:test/parity.test.ts] keeps their behaviour in step. [ref:index.ts:315]"
+    },
+    {
+      "type": "steps", "id": "one-request", "title": "One request, step by step", "nav": "One request",
+      "sub": "What happens when you ask: \"Is there anything I saved that fits what I am building?\"",
+      "plain": "The tool does not only search for your words. It also looks at what you are working on right now (git branch, recent changes, the libraries you use) and uses that to pick the best matches.",
+      "steps": [
+        {"title": "You run the recall command.", "text": "The command line recognises it and starts.", "ref": "cli.ts:136"},
+        {"title": "It opens your database.", "text": "One file in your user folder, closed again at the end.", "ref": "cli.ts:78"},
+        {"title": "It reads your git state.", "text": "Branch, last 12 commit messages, up to 20 changed files.", "ref": "stage.ts:11-56"},
+        {"title": "It reads your package files.", "text": "This shows which libraries you use.", "ref": "recall.ts:114"},
+        {"title": "It searches six ways and merges the lists.", "text": "Task and project context, each against titles, full text and passages.", "ref": "recall.ts:538-546"},
+        {"title": "It drops weak matches and adds bonuses.", "text": "A match on one of your libraries earns a lot.", "ref": "recall.ts:568-657"},
+        {"title": "It prints the best matches with reasons.", "text": "Up to 25 results, default 5, as JSON.", "ref": "cli.ts:151-161"}
+      ],
+      "note": "The call order inside `recall()` comes from an exploration report on [ref:recall.ts:496-683], not from a line-by-line trace. [guess] for the exact order inside that function."
+    },
+    {
+      "type": "parts", "id": "parts", "title": "The parts", "sub": "One file per job. Line counts are under each name.",
+      "groups": [
+        {"name": "Doors in: how a request or new data arrives", "rows": [
+          {"name": "src/cli.ts", "size": "283 lines", "what": "The main switchboard. You type a command, it picks the right helper.", "how": "One chain of `if` checks over 13 commands.", "ref": "cli.ts:70-265"},
+          {"name": "src/mcp.ts", "size": "159 lines", "what": "Lets AI assistants search your bookmarks. Four tools, all read-only.", "how": "JSON over standard input and output: search_bookmarks, get_bookmark, suggest_for_task, related_bookmarks.", "ref": "mcp.ts:42-158"},
+          {"name": "extensions/bookmark-atlas/index.ts", "size": "1334 lines, the biggest file", "what": "The search palette in the pi agent: `/bookmarks` to browse, `/consult` for suggestions.", "how": "Runs the CLI for refresh, notes, related and recall. Opens the database read-only.", "ref": "index.ts:1227-1291"},
+          {"name": "src/receiver.ts", "size": "113 lines", "what": "A tiny web server only your own computer can reach. A browser helper sends saved X posts to it.", "how": "127.0.0.1:41009, secret token, accepts x.com and twitter.com, 8 MiB limit.", "ref": "receiver.ts:6-104"}
+        ]},
+        {"name": "Answering questions", "rows": [
+          {"name": "src/search.ts", "size": "263 lines", "what": "Plain word search. Matches in the title count most.", "how": "FTS5 with bm25 weights.", "ref": "search.ts:101-143"},
+          {"name": "src/recall.ts", "size": "683 lines", "what": "The clever part. Suggests bookmarks that fit your current project.", "how": "Reads manifests, merges six ranked lists, filters, adds bonuses. Also finds related items.", "ref": "recall.ts:496-683"},
+          {"name": "src/stage.ts", "size": "58 lines", "what": "Describes what you are working on, using git.", "how": "Branch, last 12 commits, up to 20 files. No database access.", "ref": "stage.ts:11-56"}
+        ]},
+        {"name": "Bringing data in", "rows": [
+          {"name": "src/github.ts", "size": "370 lines", "what": "Fetches your starred repositories from GitHub.", "how": "Token from env or `gh auth token`, 100 per page, ETag for \"nothing changed\".", "ref": "github.ts:52-262"},
+          {"name": "src/enrich.ts", "size": "224 lines", "what": "Downloads each repo's README so search can find words inside it.", "how": "Up to 8 workers (default 4), 25 repos per run, size cap.", "ref": "enrich.ts:90-215"},
+          {"name": "src/x.ts", "size": "726 lines", "what": "Understands X bookmark files and stores posts, media and text.", "how": "Siftly, X API v2 and TweetXVault formats. Skips broken entries.", "ref": "x.ts:447-721"},
+          {"name": "src/collector.ts", "size": "61 lines", "what": "Runs the separate `tweetxvault` tool, then imports what it exported.", "how": "Temporary export folder, removed afterwards.", "ref": "collector.ts:41-59"}
+        ]},
+        {"name": "Storage", "rows": [
+          {"name": "src/db.ts", "size": "428 lines", "what": "Opens the database, creates and upgrades its tables, decides where the file lives.", "how": "SQLite, write-ahead log, foreign keys, 5 s busy timeout.", "ref": "db.ts:15-428"}
+        ]}
+      ]
+    },
+    {
+      "type": "cards", "id": "data", "title": "Where the data lives", "sub": "One SQLite file: `~/Library/Application Support/bookmark-atlas/bookmarks.db`, about 84 MB.",
+      "plain": "Every saved item is a \"resource\". Around it hang the details: when you saved it, your notes, the downloaded text, and for X posts the media. Removing a bookmark deletes nothing at first. The save is only marked as removed, and the `prune` command later cleans up orphans.",
+      "darkFirst": true,
+      "cards": [
+        {"title": "The core", "text": "One row per saved item, repo or post.", "tech": "`resources`, `github_repositories`, `x_posts`, `x_media`", "ref": "db.ts:39-96"},
+        {"title": "Who saved what", "text": "Your accounts, each save (with \"removed\"), sync history.", "tech": "`integrations`, `saves`, `sync_checkpoints`, `sync_runs`", "ref": "db.ts:29-139"},
+        {"title": "Text to search", "text": "Downloaded text in passages, plus two search indexes.", "tech": "`captures`, `chunks`, `resources_fts`, `chunks_fts`", "ref": "db.ts:139-291"},
+        {"title": "Your notes", "text": "Why a bookmark matters. Searchable, ranks highly.", "tech": "`resource_notes`, `resource_fetch_state`", "ref": "db.ts:160-177"}
+      ],
+      "note": "File location, in order: `BOOKMARK_ATLAS_DB`, then `BOOKMARK_ATLAS_DATA_DIR`, then your user folder. No override is set on this machine. [ref:db.ts:413-428] The search indexes use a stemmer and ignore accents, so \"running\" finds \"run\". [ref:db.ts:177]"
+    },
+    {
+      "type": "compare", "id": "ranking", "title": "How results are ranked", "sub": "Two recipes: a plain word search and the project-aware recall.",
+      "plain": "*Search* splits your words, drops filler like \"the\" and finds bookmarks containing any of them, with title matches counting most. *Recall* asks the same question six ways (your task, plus context from your project), merges the lists, gives a big bonus to bookmarks that mention a library you use, and throws weak matches out.",
+      "panels": [
+        {"title": "Search: how much each place counts", "rows": [["Title", "10"], ["Description", "5"], ["Topics", "3"], ["Saved text", "2"], ["Language", "1"]],
+         "note": "Scored with bm25, newest save breaks ties, default limit 10, no minimum score. [ref:search.ts:77-142]"},
+        {"title": "Recall: the ingredients", "rows": [["Your task words", "x1.0 to x1.5"], ["Project context (git stage)", "x0.3 to x0.45"], ["Each library you use that the bookmark mentions", "+14"], ["Same programming language", "+4"], ["Full text was downloaded", "+2"], ["Recently saved (fades over three years)", "up to +3"], ["Archived repository", "-6"]],
+         "note": "Six lists merged with Reciprocal Rank Fusion. A match must cover 35% of the task weight and 30% in total unless a library matches. Only still-saved items count. [ref:recall.ts:31, 60-64, 261, 538-657]"}
+      ]
+    },
+    {
+      "type": "charts", "id": "history", "title": "What changed most", "sub": "Git history from 3 to 23 September 2026.",
+      "plain": "The docs change more than any code file, which is normal for a young tool. The palette extension is the code file that moves most and also the biggest, so surprises are most likely there. All 64 commits are from one person, and about 70% came in a single week.",
+      "bars": {"title": "Commits per file", "items": [
+        {"label": "README.md", "value": 44, "kind": "docs"}, {"label": "extensions/.../index.ts", "value": 21},
+        {"label": "src/cli.ts", "value": 20}, {"label": "test/palette.test.ts", "value": 12, "kind": "test"},
+        {"label": "package.json", "value": 11, "kind": "docs"}, {"label": "src/db.ts", "value": 10},
+        {"label": "src/recall.ts", "value": 8}, {"label": "src/x.ts", "value": 7}]},
+      "weeks": {"title": "Commits per week", "items": [{"label": "week 36", "value": 19}, {"label": "week 37", "value": 0}, {"label": "week 38", "value": 0}, {"label": "week 39", "value": 45}],
+        "note": "Changed together most: README with the extension (19 times), README with `cli.ts` (15), extension with its test (12). On 22 and 23 September a semantic-search stack was removed (commits `a228cda`, `cf9285c`)."}
+    },
+    {
+      "type": "risks", "id": "watch", "title": "Things to watch", "sub": "Nothing here is broken. These are the places where a surprise is most likely.",
+      "plain": "The most useful finding: `search` and `recall` disagree about bookmarks you removed. After that come a few missing safety nets: no retries when GitHub is slow, and no tests for the main switchboard and the browser receiver.",
+      "items": [
+        {"level": "med", "title": "Search still shows bookmarks you removed", "text": "A removed bookmark is only marked as removed. `recall` skips it, `search` returns it. The same question gives different answers.", "tech": "[ref:recall.ts:234, 261, 280, 426] filter removed saves. In [ref:search.ts:125] the marker only changes the date shown. [read] and confirmed by a second reviewer."},
+        {"level": "med", "title": "GitHub sync stops at the first hiccup", "text": "If GitHub says \"slow down\" or the network drops once, the sync stops and you start it again. The tool never waits and retries.", "tech": "Any non-OK answer throws. No retry or rate-limit handling in `github.ts`, `enrich.ts`, `collector.ts`. [ref:github.ts:270-271] [read]"},
+        {"level": "med", "title": "The switchboard and the browser receiver have no tests of their own", "text": "No test loads `cli.ts`, `collector.ts`, `receiver.ts` or `stage.ts` directly. The receiver is the only part that listens on a network port. Indirect coverage is unknown.", "tech": "Checked by searching imports in `test/`. [read]"},
+        {"level": "low", "title": "The database has no version number", "text": "Each time it opens, the database checks what is missing and fixes it. That works, but nothing records which upgrades ran, and some rebuild the search index on open.", "tech": "`schema_meta` exists but nothing reads it. [ref:db.ts:24, 191-295] [read]"},
+        {"level": "low", "title": "One 1334-line file holds the palette, and one function exists twice", "text": "The data-folder function is copied into the extension on purpose, because a symlinked extension cannot import shared code. A test fails if the copies drift apart.", "tech": "[ref:docs/details.md:21-27] [ref:test/db.test.ts] [read]"},
+        {"level": "low", "title": "Your X login lives in another tool, and AI clients can read your bookmark text", "text": "`tweetxvault` handles X access, and we could not see where it stores your session. Any AI you connect through MCP can read bookmark text; the tool tells it to treat that text as untrusted.", "tech": "[ref:collector.ts:42-56] [ref:mcp.ts:127-141] [read] for both facts, [guess] for where the data goes next."},
+        {"level": "low", "label": "Minor", "title": "Small leftovers", "text": "The contributing guide says 69 tests, the code has 76. A compiled helper `macos-embed` still sits in your data folder from a removed feature.", "tech": "[ref:CONTRIBUTING.md:25] [read] for the count, [guess] for the leftover."}
+      ]
+    },
+    {
+      "type": "lists",
+      "panels": [
+        {"id": "decisions", "title": "Decisions behind it", "sub": "Choices the code makes. The author has not confirmed them.", "items": [
+          {"title": "No outside libraries at run time.", "text": "Only dev tools and optional pi packages are listed. [guess]"},
+          {"title": "Database in your user folder, not the repo.", "text": "Earlier versions wrote it into the working folder and programs disagreed. [ref:docs/details.md:7-18]"},
+          {"title": "Ship compiled JavaScript.", "text": "Node refuses to run TypeScript inside `node_modules`. [ref:README.md:59]"},
+          {"title": "Copy one function and guard it with a test.", "text": "[ref:docs/details.md:21-27]"},
+          {"title": "Treat saved text as untrusted.", "text": "[ref:mcp.ts:141] [guess]"},
+          {"title": "Word search plus rank merging, no AI embeddings.", "text": "Embeddings were removed on 22 and 23 September. [ref:cf9285c] [guess]"},
+          {"title": "Release through version tags with signed provenance.", "text": "[ref:release.yml:36-107]"}
+        ]},
+        {"id": "questions", "title": "Open questions", "sub": "Things the code alone could not answer.", "items": [
+          "Where does `tweetxvault` keep your X session, and what does it send to X?",
+          "Is it on purpose that `search` returns removed bookmarks?",
+          "Is `schema_meta` a planned version table or a leftover?",
+          "What does `DISTINCTIVE_TERM_RATIO` control? [ref:recall.ts:40]",
+          "What is `pi-warden.md` for? It is git-ignored and was not read.",
+          "Do other tests reach `cli.ts`, `collector.ts`, `receiver.ts` and `stage.ts` indirectly?",
+          "Can the leftover `macos-embed` file in the data folder be deleted?"
+        ]}
+      ]
+    },
+    {
+      "type": "run", "id": "run", "title": "How to run it", "sub": "Commands come from `package.json`. We did not run them.",
+      "plain": "You need Node.js 24 or newer. From a checkout, use `node src/cli.ts` instead of the installed command. The only secret you must set is the token for the browser receiver. GitHub access reuses your `gh` login if no token is set.",
+      "code": "# from a checkout                          # settings (environment variables)\nnode src/cli.ts status                     BOOKMARK_ATLAS_DB, BOOKMARK_ATLAS_DATA_DIR   where the database lives\nnpm test            # node --test          BOOKMARK_ATLAS_GITHUB_TOKEN or GH_TOKEN      else: gh auth token\nnpm run typecheck   # tsc --noEmit         BOOKMARK_ATLAS_X_CAPTURE_TOKEN               needed for \"capture x\"\nnpm run build       # writes dist/         BOOKMARK_ATLAS_TWEETXVAULT_BIN, _DIR         the tweetxvault tool\n\n# installed package\nbookmark-atlas recall \"task\" --repo \"$PWD\"",
+      "note": "CI runs type check and tests on Ubuntu and macOS, then checks the package contents. A tag starting with `v` publishes to npm. [ref:ci.yml] [ref:release.yml]"
+    },
+    {
+      "type": "words", "id": "words", "title": "Words you will see", "sub": "Short plain definitions.",
+      "items": [
+        ["Resource", "One saved item: a GitHub repo or an X post."], ["Save", "The link between you and a resource. Removing it only marks it."],
+        ["Capture, chunk", "Downloaded text of a resource, and the passages it is cut into."], ["Recall, consult", "Ask for saved items that fit your task and project."],
+        ["Stage", "A short description of your current work, built from git."], ["MCP", "Model Context Protocol, a standard for AI assistants to call tools."],
+        ["pi", "The coding agent that hosts the palette extension."], ["TweetXVault", "A separate tool that downloads your X bookmarks."],
+        ["FTS5", "SQLite's built-in word search."], ["bm25", "A standard formula that scores how well a text matches your words."],
+        ["Rank fusion (RRF)", "A way to merge several ranked lists into one fair list."], ["ETag", "A stamp that lets GitHub answer \"nothing changed\"."],
+        ["Provenance", "A signed npm record showing which build made a package."]
+      ]
+    }
+  ],
+  "foot": "How we checked this: four explorers read the code in parallel, then an independent reviewer checked 15 claims. All 15 were correct, and one detail plus four wordings were fixed. Not re-checked: the 84 MB size (checked in the shell) and \"the palette opens the database read-only\" (from the README and an explorer report). Generated on 5 October 2026 by `/explore-codebase`, repository state: 64 commits, last on 23 September 2026, version 0.1.1. A reading tour is in `TOUR.md`, agent notes in `AGENTS.md`."
+}

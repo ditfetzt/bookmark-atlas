@@ -1,6 +1,6 @@
 {
   "name": "bookmark-atlas",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Local SQLite knowledge base for your GitHub stars and X bookmarks, with full-text search, a CLI, an MCP server, and a pi search palette.",
   "keywords": [
     "pi-package",

@@ -112,7 +112,7 @@ and inline images. Rows are numbered by their position in the current view
 Keys: `↑↓` navigate, `Fn+←`/`Fn+→` (Home/End) jump to the first or last
 bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows, `Cmd+↑`/`Cmd+↓` do the
 same where the terminal forwards Cmd, `tab` cycle the source filter
-(All → GitHub → X), `ctrl+a` hide archived, `ctrl+d` only the last 7 days,
+(All → GitHub → X → Browsers), `ctrl+a` hide archived, `ctrl+d` only the last 7 days,
 `ctrl+t` filter by topic (a picker ranked by how many bookmarks carry each
 topic), `ctrl+l` pivot the list to what is related to the selected bookmark and
 back, `ctrl+s` cycle sort (newest → oldest → stars → A–Z, plus best match once
@@ -136,9 +136,9 @@ the prompt automatically; the user decides when to consult.
 ```bash
 "$ATLAS_CLI" sync github              # latest stars
 "$ATLAS_CLI" enrich github-readmes    # READMEs (incremental)
+"$ATLAS_CLI" sync browsers            # bookmarks from Chrome, Safari, Firefox
 "$ATLAS_CLI" collect x                # X + all media (TweetXVault)
 "$ATLAS_CLI" collect x --fast         # text only, no media
-"$ATLAS_CLI" embed                    # optional macOS embeddings
 ```
 
 ## MCP alternative
