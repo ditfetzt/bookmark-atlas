@@ -156,8 +156,13 @@ test("refresh runs every source in order and reports what changed", async () => 
   }));
   const list = palette(50, { cliRunner: run });
   await list.refresh();
-  assert.deepEqual(calls, ["sync github", "collect x --fast", "enrich github-readmes --limit 25"]);
-  assert.equal(list.notice, "✓ GitHub +3 · X +3 · READMEs +25");
+  assert.deepEqual(calls, [
+    "sync github",
+    "collect x --fast",
+    "enrich github-readmes --limit 25",
+    "sync browsers",
+  ]);
+  assert.equal(list.notice, "✓ GitHub +3 · X +3 · READMEs +25 · Browsers +3");
 });
 
 test("ctrl+r starts a refresh without waiting for it", () => {
@@ -173,15 +178,23 @@ test("a failed step is reported and does not stop the rest", async () => {
   );
   const list = palette(9, { cliRunner: run });
   await list.refresh();
-  assert.deepEqual(calls.map((call) => call.split(" ")[0]), ["sync", "collect", "enrich"]);
-  assert.equal(list.notice, "⚠ GitHub +1 · X failed · READMEs +1");
+  assert.deepEqual(calls, [
+    "sync github",
+    "collect x --fast",
+    "enrich github-readmes --limit 25",
+    "sync browsers",
+  ]);
+  assert.equal(list.notice, "⚠ GitHub +1 · X failed · READMEs +1 · Browsers +1");
 });
 
 test("a step reporting no change reads as such", async () => {
   const { run } = fakeRunner(() => ({ ok: true, stdout: JSON.stringify({ imported: 0, enriched: 0 }) }));
   const list = palette(50, { cliRunner: run });
   await list.refresh();
-  assert.equal(list.notice, "✓ GitHub no change · X no change · READMEs no change");
+  assert.equal(
+    list.notice,
+    "✓ GitHub no change · X no change · READMEs no change · Browsers no change",
+  );
 });
 
 test("? opens help only while the search box is empty", () => {

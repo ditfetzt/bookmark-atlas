@@ -23,6 +23,7 @@ and posts, so the same search, the same recall ranking, and the same palette rea
 - `sync browsers`, reading the Chromium family, Safari and Firefox, with `--browser` and `--profile` to narrow the run.
 - `browsers`, which lists every source found and reports per-source read errors — the answer to "why is Safari empty?" without a stack trace.
 - A **Browsers** filter in the palette: `tab` now cycles All → GitHub → X → Browsers.
+- `ctrl+r` in the palette now syncs browsers as well, so a bookmark you add in your browser shows up without leaving pi. It runs last, because it is the cheapest step and the only one that can fail per source: a blocked Safari plist reports itself without stopping the rest.
 - Browser bookmarks are indexed as `web_page` resources, so full-text search, `recall` and `related` reach them like anything else.
 - Folders are recorded per save, next to the browser and profile the bookmark came from.
 

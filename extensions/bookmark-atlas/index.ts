@@ -9,7 +9,7 @@
  *   enter    insert the bookmark (title, url, content) into the editor
  *   ctrl+y   copy the url
  *   ctrl+o   open the url in the default browser
- *   ctrl+r   fetch new bookmarks (GitHub stars, X posts, READMEs)
+ *   ctrl+r   fetch new bookmarks (GitHub stars, X posts, READMEs, browsers)
  *   ctrl+e   read the full text
  *   ctrl+n   write a note about the selected bookmark
  *   ctrl+t   filter by topic; ctrl+a hide archived; ctrl+d only the last 7 days
@@ -661,6 +661,9 @@ export class BookmarkPalette implements Component, Focusable {
 			{ label: "GitHub", args: ["sync", "github"], key: "imported" },
 			{ label: "X", args: ["collect", "x", "--fast"], key: "imported" },
 			{ label: "READMEs", args: ["enrich", "github-readmes", "--limit", "25"], key: "enriched" },
+			// Last because it is the cheapest and the only one that can fail per
+			// source: a blocked Safari plist reports itself without stopping the run.
+			{ label: "Browsers", args: ["sync", "browsers"], key: "imported" },
 		];
 		this.refreshing = true;
 		const parts: string[] = [];
@@ -1029,7 +1032,7 @@ export class BookmarkPalette implements Component, Focusable {
 			key("ctrl+n", "write a note: why this matters to you"),
 			key("ctrl+y", "copy the url"),
 			key("ctrl+o", "open in the browser"),
-			key("ctrl+r", "fetch new bookmarks (GitHub, X, READMEs)"),
+			key("ctrl+r", "fetch new bookmarks (GitHub, X, READMEs, browsers)"),
 			"",
 			key("? / f1", "this help"),
 			key("esc", "close"),
