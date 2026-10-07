@@ -91,7 +91,7 @@ Behaviour:
 # attach a note explaining why a bookmark matters (searchable, ranked highly)
 "$ATLAS_CLI" note <resource-id> "why this matters"
 
-# counts and sync state
+# counts, sync state, and how far page fetching has got
 "$ATLAS_CLI" status
 ```
 
@@ -145,6 +145,7 @@ the prompt automatically; the user decides when to consult.
 "$ATLAS_CLI" browsers                 # what was found, and which are switched on
 "$ATLAS_CLI" browsers --enable brave   # import only brave (all | none | a,b)
 "$ATLAS_CLI" enrich web-pages          # fetch page text so search reaches it (--limit 25)
+                                      # blocked pages retry via the Wayback Machine
 "$ATLAS_CLI" collect x                # X + all media (TweetXVault)
 "$ATLAS_CLI" collect x --fast         # text only, no media
 ```

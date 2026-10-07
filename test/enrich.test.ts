@@ -244,6 +244,54 @@ test("a PDF or an image is not treated as a page", async () => {
   db.close();
 });
 
+test("a blocked page falls back to the Wayback Machine", async () => {
+  const db = seedPages();
+  const snapshot = "https://web.archive.org/web/20260101000000/https://example.com/1";
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("https://archive.org/wayback/available")) {
+      return Response.json({ archived_snapshots: { closest: { available: true, url: snapshot } } });
+    }
+    if (url === snapshot) return htmlResponse(PAGE_HTML);
+    return new Response("Just a moment...", { status: 403 });
+  };
+
+  const result = await enrichWebPages(db, { limit: 1, concurrency: 1, fetchImpl });
+
+  assert.equal(result.enriched, 1, "the archived copy is indexed");
+  assert.equal(
+    (db.prepare("SELECT source_url FROM captures WHERE kind = 'web_page'").get() as { source_url: string })
+      .source_url,
+    snapshot,
+    "the text is credited to where it came from",
+  );
+  assert.equal(
+    (db.prepare("SELECT status FROM resource_fetch_state WHERE kind = 'web_page'").get() as { status: string })
+      .status,
+    "archived",
+  );
+  db.close();
+});
+
+test("a page with no archive snapshot still reports the original failure", async () => {
+  const db = seedPages();
+  const fetchImpl: typeof fetch = async (input) => {
+    if (String(input).startsWith("https://archive.org/wayback/available")) {
+      return Response.json({ archived_snapshots: {} });
+    }
+    return new Response("nope", { status: 403 });
+  };
+
+  const result = await enrichWebPages(db, { limit: 1, concurrency: 1, fetchImpl });
+
+  assert.equal(result.failed, 1);
+  const row = db
+    .prepare("SELECT error_message FROM resource_fetch_state WHERE kind = 'web_page'")
+    .get() as { error_message: string };
+  assert.match(row.error_message, /HTTP 403/);
+  db.close();
+});
+
 test("a failed fetch does not block the next batch", async () => {
   // This is the whole reason batching works. A failure records no success, so
   // ordering on success would retry it at the front of every batch and never

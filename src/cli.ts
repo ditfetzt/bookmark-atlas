@@ -360,8 +360,19 @@ async function main(): Promise<void> {
           (SELECT COUNT(*) FROM resources_fts) AS indexedResources,
           (SELECT COUNT(*) FROM captures WHERE kind = 'github_readme') AS readmeCaptures,
           (SELECT COUNT(*) FROM x_posts) AS xPosts,
-          (SELECT COUNT(*) FROM chunks) AS chunks
+          (SELECT COUNT(*) FROM chunks) AS chunks,
+          (SELECT COUNT(*) FROM resources r
+             JOIN saves s ON s.resource_id = r.id AND s.unsaved_at IS NULL
+             LEFT JOIN resource_fetch_state f
+               ON f.resource_id = r.id AND f.kind = 'web_page'
+            WHERE r.resource_type = 'web_page' AND f.resource_id IS NULL) AS webPagesPending
       `).get();
+      const fetchState = db.prepare(`
+        SELECT kind, status, COUNT(*) AS count
+        FROM resource_fetch_state
+        GROUP BY kind, status
+        ORDER BY kind, status
+      `).all();
       const sync = db.prepare(`
         SELECT i.provider, i.account, c.high_watermark AS highWatermark,
                c.last_success_at AS lastSuccessAt, c.last_reconciled_at AS lastReconciledAt,
@@ -375,6 +386,7 @@ async function main(): Promise<void> {
           {
             database: databasePath(),
             counts,
+            fetchState,
             sync,
           },
           null,

@@ -73,7 +73,7 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 | `browsers` | List the browser bookmark sources found, and whether each is readable |
 | `browsers --enable NAME,NAME \| all \| none` | Choose which browsers to import from |
 | `enrich github-readmes` | Fetch README text; incremental and ETag-aware |
-| `enrich web-pages [--limit N] [--concurrency N]` | Fetch and index the text behind browser bookmarks |
+| `enrich web-pages [--limit N] [--concurrency N]` | Fetch and index the text behind browser bookmarks; blocked pages fall back to the Wayback Machine |
 | `enrich x-posts` | Repair X titles and authors from the stored payload |
 | `import x-json <file>` | Import a Siftly or TweetXVault export |
 | `collect x [--fast]` | Full X pass via TweetXVault; `--fast` skips media |
@@ -84,7 +84,7 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 | `related <id>` | What relates to one bookmark, and why |
 | `get <id> [--content]` | One source's metadata, optionally with its full text |
 | `note <id> "text"` \| `--clear` | Attach a searchable note explaining why it matters |
-| `status` | Counts and sync state |
+| `status` | Counts, sync state, and fetch progress per kind |
 | `prune [--dry-run]` | Delete resources with no active save |
 | `mcp` | MCP server over stdio |
 
@@ -150,6 +150,14 @@ bookmark-atlas enrich web-pages --limit 100 --concurrency 8
 **Batches are the point.** Each run walks the collection once, so `--limit 25` costs 25 fetches and the next run continues where that one stopped rather than retrying its failures forever. Re-runs are incremental — a page that has not changed is skipped on its ETag.
 
 This is a plain HTTP fetch, so expect roughly two thirds of a collection to yield useful text. Articles, blogs, documentation, and changelogs come through well. Pages that build themselves in JavaScript — YouTube, app dashboards — return an empty shell, and PDFs, images and login walls are not HTML at all; all of those are reported as `empty` rather than stored as content, because storing them would tell search there is something to find on a page where there is nothing.
+
+**Blocked pages fall back to the Wayback Machine.** A 403, a rate limit or a Cloudflare challenge is usually aimed at the visitor, not the page, so the newest archived snapshot is tried before the fetch is called a failure — on a real collection that recovered 4 of 5 blocked pages, including one that headless Chromium could not get past. The capture records the snapshot URL as its source, so the text always says where it came from.
+
+`status` shows where the work stands:
+
+```bash
+bookmark-atlas status   # fetchState: available / archived / empty / failed, and webPagesPending
+```
 
 No dependency is involved: the HTML is reduced to text by a small extractor that drops `script`/`style`/comments, turns block boundaries into line breaks, and decodes entities.
 

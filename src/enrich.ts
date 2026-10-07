@@ -411,6 +411,94 @@ function webPageTargets(db: AtlasDatabase, limit: number): WebPageTarget[] {
   `).all(limit) as WebPageTarget[];
 }
 
+type PageFetch =
+  | { kind: "unchanged" }
+  | { kind: "not-text"; detail: string }
+  | { kind: "too-thin"; detail: string }
+  | { kind: "ok"; content: string; etag: string | null }
+  | { kind: "failed"; detail: string };
+
+/**
+ * One attempt at reading a page. It reports what happened instead of recording
+ * it, so a blocked page can be retried against the archive before anything is
+ * written down.
+ */
+async function fetchPage(
+  url: string,
+  etag: string | null,
+  fetchImpl: typeof fetch,
+  maxBytes: number,
+  timeoutMs: number,
+): Promise<PageFetch> {
+  const headers: Record<string, string> = {
+    Accept: "text/html,application/xhtml+xml",
+    "User-Agent": USER_AGENT,
+  };
+  if (etag) headers["If-None-Match"] = etag;
+
+  try {
+    const response = await fetchImpl(url, {
+      headers,
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (response.status === 304) return { kind: "unchanged" };
+    if (!response.ok) return { kind: "failed", detail: `HTTP ${response.status} ${response.statusText}` };
+
+    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+    if (!contentType.includes("html") && !contentType.includes("text/plain")) {
+      // A PDF, an image, a JSON endpoint: there is no page here to read.
+      return { kind: "not-text", detail: `content-type: ${contentType || "unknown"}` };
+    }
+
+    const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "0", 10);
+    if (declaredLength > maxBytes) return { kind: "failed", detail: `page exceeds ${maxBytes} byte limit` };
+    const body = await response.text();
+    if (Buffer.byteLength(body, "utf8") > maxBytes) {
+      return { kind: "failed", detail: `page exceeds ${maxBytes} byte limit` };
+    }
+
+    // Title and description first: on a thin page they are most of what there is.
+    const page = extractPage(body);
+    const content = [page.title, page.description, page.text].filter(Boolean).join("\n\n").trim();
+    if (content.length < MIN_USEFUL_CHARS) {
+      return { kind: "too-thin", detail: `only ${content.length} characters of readable text` };
+    }
+    return { kind: "ok", content, etag: response.headers.get("etag") };
+  } catch (error) {
+    return { kind: "failed", detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * The newest snapshot of a page in the Wayback Machine, or null if it has none.
+ * A block is usually aimed at the visitor, not the page, so a site that turns
+ * this away often still reads fine from the archive.
+ */
+async function waybackSnapshot(
+  fetchImpl: typeof fetch,
+  url: string,
+  timeoutMs: number,
+): Promise<string | null> {
+  try {
+    const response = await fetchImpl(
+      `https://archive.org/wayback/available?url=${encodeURIComponent(url)}`,
+      {
+        headers: { Accept: "application/json", "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+    );
+    if (!response.ok) return null;
+    const body = (await response.json()) as {
+      archived_snapshots?: { closest?: { available?: boolean; url?: string } };
+    };
+    const closest = body.archived_snapshots?.closest;
+    return closest?.available && closest.url ? closest.url : null;
+  } catch {
+    return null;
+  }
+}
+
 async function enrichWebPage(
   db: AtlasDatabase,
   target: WebPageTarget,
@@ -418,54 +506,43 @@ async function enrichWebPage(
   maxBytes: number,
   timeoutMs: number,
 ): Promise<"enriched" | "unchanged" | "empty" | "failed"> {
-  const headers: Record<string, string> = {
-    Accept: "text/html,application/xhtml+xml",
-    "User-Agent": USER_AGENT,
-  };
-  if (target.etag) headers["If-None-Match"] = target.etag;
+  let sourceUrl = target.url;
+  let etag = target.etag;
+  let result = await fetchPage(target.url, target.etag, fetchImpl, maxBytes, timeoutMs);
+  if (result.kind === "ok") etag = result.etag;
 
-  try {
-    const response = await fetchImpl(target.url, {
-      headers,
-      redirect: "follow",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-    if (response.status === 304) {
-      saveFetchState(db, target, "web_page", { status: "unchanged", success: true });
-      return "unchanged";
+  if (result.kind === "failed" || result.kind === "too-thin") {
+    const snapshot = await waybackSnapshot(fetchImpl, target.url, timeoutMs);
+    if (snapshot) {
+      const archived = await fetchPage(snapshot, null, fetchImpl, maxBytes, timeoutMs);
+      if (archived.kind === "ok") {
+        result = archived;
+        sourceUrl = snapshot;
+      } else if (archived.kind === "failed") {
+        result = { ...result, detail: `${result.detail}; archive: ${archived.detail}` };
+      }
     }
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ${response.statusText}`);
-    }
+  }
 
-    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
-    if (!contentType.includes("html") && !contentType.includes("text/plain")) {
-      // A PDF, an image, a JSON endpoint: there is no page here to read.
-      saveFetchState(db, target, "web_page", {
-        status: "not-text",
-        error: `content-type: ${contentType || "unknown"}`,
-      });
-      return "empty";
-    }
+  if (result.kind === "unchanged") {
+    saveFetchState(db, target, "web_page", { status: "unchanged", success: true });
+    return "unchanged";
+  }
+  if (result.kind === "not-text") {
+    saveFetchState(db, target, "web_page", { status: "not-text", error: result.detail });
+    return "empty";
+  }
+  if (result.kind === "too-thin") {
+    saveFetchState(db, target, "web_page", { status: "empty", error: result.detail });
+    return "empty";
+  }
+  if (result.kind === "failed") {
+    saveFetchState(db, target, "web_page", { status: "failed", error: result.detail });
+    return "failed";
+  }
 
-    const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "0", 10);
-    if (declaredLength > maxBytes) throw new Error(`page exceeds ${maxBytes} byte limit`);
-    const body = await response.text();
-    if (Buffer.byteLength(body, "utf8") > maxBytes) {
-      throw new Error(`page exceeds ${maxBytes} byte limit`);
-    }
-
-    const page = extractPage(body);
-    // Title and description first: on a thin page they are most of what there is.
-    const content = [page.title, page.description, page.text].filter(Boolean).join("\n\n").trim();
-    if (content.length < MIN_USEFUL_CHARS) {
-      saveFetchState(db, target, "web_page", {
-        status: "empty",
-        error: `only ${content.length} characters of readable text`,
-      });
-      return "empty";
-    }
-
+  {
+    const content = result.content;
     const contentHash = hash(content);
     const fetchedAt = new Date().toISOString();
     db.exec("BEGIN IMMEDIATE");
@@ -476,7 +553,7 @@ async function enrichWebPage(
         ) VALUES (?, 'web_page', ?, ?, ?, ?)
         ON CONFLICT(resource_id, kind, content_hash) DO UPDATE SET
           fetched_at = excluded.fetched_at
-      `).run(target.resourceId, target.url, fetchedAt, contentHash, content);
+      `).run(target.resourceId, sourceUrl, fetchedAt, contentHash, content);
       const capture = db
         .prepare(
           "SELECT id FROM captures WHERE resource_id = ? AND kind = 'web_page' AND content_hash = ?",
@@ -492,21 +569,19 @@ async function enrichWebPage(
         insertChunk.run(capture.id, ordinal, chunk, Math.ceil(chunk.length / 4), hash(chunk));
       }
       saveFetchState(db, target, "web_page", {
-        etag: response.headers.get("etag"),
-        status: "available",
+        etag,
+        status: sourceUrl === target.url ? "available" : "archived",
         success: true,
       });
       refreshResourceFts(db, target.resourceId);
       db.exec("COMMIT");
     } catch (error) {
       db.exec("ROLLBACK");
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      saveFetchState(db, target, "web_page", { status: "failed", error: message });
+      return "failed";
     }
     return "enriched";
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    saveFetchState(db, target, "web_page", { status: "failed", error: message });
-    return "failed";
   }
 }
 
