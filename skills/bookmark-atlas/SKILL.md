@@ -116,7 +116,10 @@ same where the terminal forwards Cmd, `tab` cycle the source filter
 `ctrl+t` filter by topic (a picker ranked by how many bookmarks carry each
 topic), `ctrl+b` choose which browsers to import from (space toggles, enter
 saves and re-syncs; switching a browser off hides its bookmarks from search
-and recall), `ctrl+l` pivot the list to what is related to the selected bookmark and
+and recall). The browser list shows distinct pages and how many of those exist
+in no other browser, because a browser holding four copies of the same import
+reports a huge bookmark count and contributes almost nothing. Browsers that are
+not installed are listed but off by default. `ctrl+l` pivot the list to what is related to the selected bookmark and
 back, `ctrl+s` cycle sort (newest → oldest → stars → A–Z, plus best match once
 a query is typed; sorting by stars swaps the date column for the star count and
 puts unstarred X posts last), `ctrl+r` fetch new bookmarks (runs `sync github`,

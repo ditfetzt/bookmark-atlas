@@ -24,6 +24,7 @@ and posts, so the same search, the same recall ranking, and the same palette rea
 - `browsers`, which lists every source found and reports per-source read errors — the answer to "why is Safari empty?" without a stack trace.
 - A **Browsers** filter in the palette: `tab` now cycles All → GitHub → X → Browsers.
 - **A `ctrl+b` picker for choosing which browsers to import from**, plus `browsers --enable NAME,NAME|all|none` for the shell. The choice is stored in `config.json` beside the database, and switching a browser off hides its bookmarks from search and recall rather than only filtering the list — `tab` narrows what you see, but search and recall rank everything. The saves are marked removed rather than deleted, so switching a browser back on restores them, and `prune` stays the step that actually deletes.
+- `bookmark-atlas browsers` reports, per browser, how many distinct pages it holds and how many of those exist in no other browser.
 - `ctrl+r` in the palette now syncs browsers as well, so a bookmark you add in your browser shows up without leaving pi. It runs last, because it is the cheapest step and the only one that can fail per source: a blocked Safari plist reports itself without stopping the rest.
 - Browser bookmarks are indexed as `web_page` resources, so full-text search, `recall` and `related` reach them like anything else.
 - Folders are recorded per save, next to the browser and profile the bookmark came from.
@@ -37,6 +38,9 @@ and posts, so the same search, the same recall ranking, and the same palette rea
 ### Fixed
 
 - **Search returned resources that were no longer saved.** `searchResources` never filtered on an active save, while `recall` and the palette both did, so a repository you had unstarred — or a page whose browser you had switched off — stayed findable by search indefinitely. Search now excludes them, like everything else.
+- **`http` and `https` for the same host were two resources.** The same link saved in two browsers rarely agrees on the scheme, and the `http://` side is almost always a stale address that redirects. `golem.de` was stored twice on a real collection.
+- **Bookmarks from uninstalled browsers were imported.** Uninstalling a browser leaves its profile behind, and those leftovers were read as if the browser were still there — which is how Firefox's four stock `mozilla.org` bookmarks appear on a machine that has no Firefox. A browser is now only imported by default when its application is actually present, and an unknown browser is assumed installed rather than hidden on a guess.
+- **The browser picker reported bookmark counts, which made it look like it did far more than it does.** Ego read `517` while contributing four pages, because four profiles held four copies of the same import. It now reports distinct pages and how many exist in no other browser, taken from the browser files rather than the database — a switched-off browser's saves are marked removed, so a database view reports nothing for exactly the browsers someone opens that list to decide about.
 - `/bookmarks` now describes itself as searching GitHub stars, X posts, and browser bookmarks. It had said only stars and posts since the browser work landed.
 
 ### Notes

@@ -148,10 +148,24 @@ function sourceOf(bookmark: Bookmark): "github" | "x" | "browsers" {
 
 /**
  * `bookmark-atlas browsers` reports one entry per browser profile, but the
- * selection is per browser, so this folds the profiles into one row each. A
- * provider with several profiles shows the total it would contribute.
+ * selection is per browser, so this folds the profiles into one row each.
+ *
+ * `count` is the raw bookmark total across profiles and `pages` is how many
+ * distinct links that comes to. They differ wildly — four profiles of the same
+ * import hold a thousand bookmarks and a couple of hundred pages — and `unique`
+ * is the part that exists in no other browser, which is what switching this one
+ * on is actually worth.
  */
-function parseBrowserList(stdout: string): Array<{ provider: string; count: number; enabled: boolean }> {
+type BrowserRow = {
+	provider: string;
+	count: number;
+	pages: number;
+	unique: number;
+	installed: boolean;
+	enabled: boolean;
+};
+
+function parseBrowserList(stdout: string): BrowserRow[] {
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(stdout);
@@ -162,16 +176,43 @@ function parseBrowserList(stdout: string): Array<{ provider: string; count: numb
 	const sources = (parsed as { sources?: unknown }).sources;
 	if (!Array.isArray(sources)) return [];
 
-	const byProvider = new Map<string, { provider: string; count: number; enabled: boolean }>();
+	const contributions = new Map<string, { pages: number; unique: number }>();
+	const reported = (parsed as { contributions?: unknown }).contributions;
+	if (Array.isArray(reported)) {
+		for (const entry of reported) {
+			if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+			const { provider, pages, unique } = entry as {
+				provider?: unknown;
+				pages?: unknown;
+				unique?: unknown;
+			};
+			if (typeof provider !== "string") continue;
+			contributions.set(provider, {
+				pages: typeof pages === "number" ? pages : 0,
+				unique: typeof unique === "number" ? unique : 0,
+			});
+		}
+	}
+
+	const byProvider = new Map<string, BrowserRow>();
 	for (const entry of sources) {
 		if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
-		const { provider, bookmarks, enabled } = entry as {
+		const { provider, bookmarks, enabled, installed } = entry as {
 			provider?: unknown;
 			bookmarks?: unknown;
 			enabled?: unknown;
+			installed?: unknown;
 		};
 		if (typeof provider !== "string") continue;
-		const row = byProvider.get(provider) ?? { provider, count: 0, enabled: enabled === true };
+		const contribution = contributions.get(provider);
+		const row = byProvider.get(provider) ?? {
+			provider,
+			count: 0,
+			pages: contribution?.pages ?? 0,
+			unique: contribution?.unique ?? 0,
+			installed: installed !== false,
+			enabled: enabled === true,
+		};
 		row.count += typeof bookmarks === "number" ? bookmarks : 0;
 		byProvider.set(provider, row);
 	}
@@ -413,7 +454,7 @@ export class BookmarkPalette implements Component, Focusable {
 	private topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null = null;
 	/** Which browsers to import from. `count` is across every profile of that browser. */
 	private browserPicker: {
-		entries: Array<{ provider: string; count: number; enabled: boolean }>;
+		entries: BrowserRow[];
 		index: number;
 		saving: boolean;
 	} | null = null;
@@ -1179,7 +1220,13 @@ export class BookmarkPalette implements Component, Focusable {
 				continue;
 			}
 			const box = entry.enabled ? "[x]" : "[ ]";
-			const text = `${index === selected ? "▸" : " "} ${box} ${entry.provider.padEnd(20)}${String(entry.count).padStart(5)}`;
+			// Pages and unique, not the raw bookmark count: a browser holding four
+			// copies of the same import reads as 258 pages and +4 new, which is the
+			// whole reason someone is looking at this list.
+			const pages = `${entry.pages} pages`.padStart(11);
+			const unique = `+${entry.unique} new`.padStart(9);
+			const note = entry.installed ? "" : "   not installed";
+			const text = `${index === selected ? "▸" : " "} ${box} ${entry.provider.padEnd(11)}${pages}${unique}${note}`;
 			lines.push(
 				row(
 					index === selected ? theme.bg("selectedBg", theme.fg("text", text)) : theme.fg("muted", text),
@@ -1188,6 +1235,9 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		lines.push(theme.fg("border", `└${"─".repeat(width - 2)}┘`));
 		lines.push(theme.fg("dim", "  ↑↓ navigate · space toggle · enter save · esc cancel"));
+		lines.push(
+			theme.fg("dim", "  pages = distinct links · new = not in any other browser"),
+		);
 		lines.push(
 			theme.fg("dim", "  switching a browser off hides its bookmarks from search and recall"),
 		);

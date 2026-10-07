@@ -5,12 +5,16 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import {
+  browserContributions,
   canonicalBookmarkUrl,
+  distinctBookmarkPages,
+  isBrowserInstalled,
   parseXmlPlist,
   readChromiumBookmarks,
   readFirefoxBookmarks,
   readSafariBookmarks,
   syncBrowserBookmarks,
+  type BrowserBookmark,
   type BrowserSource,
   type PlistValue,
 } from "../src/browsers.ts";
@@ -135,6 +139,84 @@ test("the same page bookmarked twice canonicalises to one key", () => {
     canonicalBookmarkUrl("https://example.com/x?fbclid=abc"),
     canonicalBookmarkUrl("https://example.com/x"),
   );
+});
+
+test("http and https are the same page", () => {
+  // The same link saved in two browsers rarely agrees on the scheme, and the
+  // http:// side is almost always a stale address that redirects. Keeping both
+  // split golem.de into two resources on a real collection.
+  assert.equal(
+    canonicalBookmarkUrl("http://www.golem.de/"),
+    canonicalBookmarkUrl("https://www.golem.de/"),
+  );
+});
+
+// ---------------------------------------------------------------------------
+// What a browser contributes
+// ---------------------------------------------------------------------------
+
+function bookmark(url: string): BrowserBookmark {
+  return {
+    externalId: url,
+    url,
+    title: url,
+    folderPath: [],
+    addedAt: null,
+    description: null,
+  };
+}
+
+test("distinctBookmarkPages keys pages exactly the way the importer does", () => {
+  const pages = distinctBookmarkPages([
+    bookmark("http://example.com/a?utm_source=news"),
+    bookmark("https://example.com/a"),
+    bookmark("https://example.com/b"),
+    bookmark("file:///tmp/notes.md"),
+  ]);
+  assert.equal(pages.size, 2, "http, https and the tracking parameter are one page");
+  assert.deepEqual([...pages].sort(), ["https://example.com/a", "https://example.com/b"]);
+});
+
+test("contributions separate what a browser holds from what only it holds", () => {
+  // The shape that caused the confusion: four profiles of the same import hold a
+  // thousand bookmarks and contribute almost nothing new.
+  const pages = new Map([
+    ["brave", new Set(["a", "b", "c"])],
+    ["ego", new Set(["c", "d"])],
+    ["safari", new Set(["e"])],
+  ]);
+  assert.deepEqual(browserContributions(pages), [
+    { provider: "brave", pages: 3, unique: 2 },
+    { provider: "ego", pages: 2, unique: 1 },
+    { provider: "safari", pages: 1, unique: 1 },
+  ]);
+});
+
+// ---------------------------------------------------------------------------
+// Installed or left behind
+// ---------------------------------------------------------------------------
+
+test("an unknown browser is assumed installed, never hidden on a guess", () => {
+  assert.equal(isBrowserInstalled("netscape"), true);
+  assert.equal(isBrowserInstalled(""), true);
+});
+
+test("an explicit source list is not second-guessed by the install check", () => {
+  // Neither provider here is installed on the machine running this test, so this
+  // passes only because a given source list bypasses the check. Without that, the
+  // install check would make the whole fixture suite silently sync nothing.
+  const dir = workspace();
+  const db = openDatabase(":memory:");
+  try {
+    const file = join(dir, "Bookmarks");
+    writeFileSync(file, JSON.stringify(CHROMIUM_FIXTURE));
+    const result = syncBrowserBookmarks(db, { sources: [chromiumSource(file)] });
+    assert.equal(result.imported, 2);
+    assert.deepEqual(result.excluded, []);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ---------------------------------------------------------------------------

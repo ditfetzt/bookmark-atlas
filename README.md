@@ -113,17 +113,29 @@ Re-running is safe: a second pass updates instead of re-importing. Delete a book
 
 ### Choosing which browsers to import
 
-Every browser found is imported by default. To narrow that, press **`ctrl+b`** in the palette and switch browsers on or off, or set it from the shell:
+Every browser **that is installed** is imported by default. A profile left behind by an uninstalled browser is listed but stays off, so the stock bookmarks of a browser you removed do not appear from nowhere.
+
+Press **`ctrl+b`** in the palette and switch browsers on or off, or set it from the shell:
 
 ```bash
 bookmark-atlas browsers --enable brave,safari
-bookmark-atlas browsers --enable all      # the default
+bookmark-atlas browsers --enable all      # every installed browser, the default
 bookmark-atlas browsers --enable none     # import nothing
 ```
 
+The picker shows what each browser is *worth*, not how many bookmarks it holds:
+
+```text
+▸ [x] brave        279 pages  +25 new
+  [ ] ego          258 pages   +4 new
+  [ ] firefox        4 pages   +4 new   not installed
+```
+
+**pages** is distinct links and **new** is links no other browser holds. Four profiles of the same import can hold a thousand bookmarks and contribute four pages; the raw count hides that, and `--enable` on the raw count looks like it should change far more than it does.
+
 The choice lives in `config.json` beside the database. Switching a browser off **hides its bookmarks from search and recall**, because `tab` only filters what you see while search and recall rank everything. The saves are marked removed rather than deleted, so switching the browser back on restores them — `prune` is what actually deletes. A browser that is off is also not synced.
 
-**Only `http` and `https` are imported.** `javascript:`, `chrome://`, and `file://` entries are counted and skipped — they cannot be fetched, and they are not pages.
+**Only `http` and `https` are imported.** `javascript:`, `chrome://`, and `file://` entries are counted and skipped — they cannot be fetched, and they are not pages. `http` and `https` for the same host are treated as one page, because the same link saved in two browsers rarely agrees on the scheme and one side is usually a stale address that redirects.
 
 ## Recall — bookmarks as context for the agent
 

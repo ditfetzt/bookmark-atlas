@@ -7,7 +7,7 @@ import { collectStage } from "./stage.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile, repairXPosts } from "./x.ts";
 import { collectXBookmarks } from "./collector.ts";
-import { BROWSER_PROVIDERS, discoverBrowserSources, readBrowserSource, syncBrowserBookmarks } from "./browsers.ts";
+import { BROWSER_PROVIDERS, browserContributions, discoverBrowserSources, distinctBookmarkPages, isBrowserInstalled, readBrowserSource, syncBrowserBookmarks } from "./browsers.ts";
 import { atlasConfigPath, readConfig, writeConfig } from "./config.ts";
 import { startXCaptureServer } from "./receiver.ts";
 import { startMcpServer } from "./mcp.ts";
@@ -151,8 +151,11 @@ async function main(): Promise<void> {
     }
 
     if (command === "browsers") {
-      const enabled = readConfig().browsers;
-      const isEnabled = (provider: string): boolean => enabled === null || enabled.includes(provider);
+      const configured = readConfig().browsers;
+      // With nothing recorded, "all" means every browser that is installed. A
+      // leftover profile of an uninstalled browser stays off until asked for.
+      const isEnabled = (provider: string): boolean =>
+        configured === null ? isBrowserInstalled(provider) : configured.includes(provider);
       const known = [...BROWSER_PROVIDERS].sort((a, b) => a.localeCompare(b));
 
       // --enable is the only writer of the browser selection, so the palette
@@ -178,34 +181,42 @@ async function main(): Promise<void> {
 
       // The diagnostic for "why is Safari empty?": it reports the permission
       // error per source instead of failing the whole run.
+      // Every source is read once here, and the pages it holds are kept, so the
+      // per-browser totals come from the browser files rather than from what
+      // happens to be synced. A browser that is switched off has its saves marked
+      // removed, so a database view reports nothing for exactly the browsers
+      // someone opens this list to decide about.
+      const pagesByProvider = new Map<string, Set<string>>();
       const sources = discoverBrowserSources().map((source) => {
+        const base = {
+          provider: source.provider,
+          profile: source.profile,
+          kind: source.kind,
+          path: source.path,
+          installed: isBrowserInstalled(source.provider),
+          enabled: isEnabled(source.provider),
+        };
         try {
-          return {
-            provider: source.provider,
-            profile: source.profile,
-            kind: source.kind,
-            path: source.path,
-            enabled: isEnabled(source.provider),
-            bookmarks: readBrowserSource(source).length,
-          };
+          const bookmarks = readBrowserSource(source);
+          const pages = pagesByProvider.get(source.provider) ?? new Set<string>();
+          for (const page of distinctBookmarkPages(bookmarks)) pages.add(page);
+          pagesByProvider.set(source.provider, pages);
+          return { ...base, bookmarks: bookmarks.length };
         } catch (error) {
-          return {
-            provider: source.provider,
-            profile: source.profile,
-            kind: source.kind,
-            path: source.path,
-            enabled: isEnabled(source.provider),
-            error: error instanceof Error ? error.message : String(error),
-          };
+          return { ...base, error: error instanceof Error ? error.message : String(error) };
         }
       });
       console.log(
         JSON.stringify(
           {
             config: atlasConfigPath(),
-            enabled: enabled ?? "all",
+            enabled: configured ?? "all",
             known,
             found: sources.length,
+            // Per browser, not per profile: pages is what it holds and unique is
+            // what nothing else holds, so a browser with a thousand bookmarks
+            // and four unique pages reads as what it is.
+            contributions: browserContributions(pagesByProvider),
             sources,
           },
           null,

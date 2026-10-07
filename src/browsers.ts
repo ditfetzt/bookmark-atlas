@@ -112,6 +112,122 @@ export const BROWSER_PROVIDERS: ReadonlySet<string> = new Set([
   "firefox",
 ]);
 
+// Where each browser's application lives, relative to the platform's application
+// directories. Uninstalling a browser leaves its profile behind, and importing
+// from a leftover is how you end up with bookmarks you never made — Firefox's
+// four stock mozilla.org links being the usual example.
+//
+// A provider with no entry here cannot be checked, and is treated as installed:
+// never hide a browser that might be there.
+const BROWSER_APPS: Record<string, Record<string, string[]>> = {
+  darwin: {
+    chrome: ["Google Chrome.app"],
+    chromium: ["Chromium.app"],
+    brave: ["Brave Browser.app"],
+    edge: ["Microsoft Edge.app"],
+    vivaldi: ["Vivaldi.app"],
+    arc: ["Arc.app"],
+    opera: ["Opera.app"],
+    ego: ["ego lite.app", "Ego Browser.app"],
+    safari: ["Safari.app"],
+    firefox: ["Firefox.app"],
+  },
+  linux: {
+    chrome: ["google-chrome", "google-chrome-stable"],
+    chromium: ["chromium", "chromium-browser"],
+    brave: ["brave-browser"],
+    edge: ["microsoft-edge", "microsoft-edge-stable"],
+    vivaldi: ["vivaldi"],
+    opera: ["opera"],
+    firefox: ["firefox"],
+  },
+  win32: {
+    chrome: ["Google/Chrome/Application"],
+    chromium: ["Chromium/Application"],
+    brave: ["BraveSoftware/Brave-Browser/Application"],
+    edge: ["Microsoft/Edge/Application"],
+    vivaldi: ["Vivaldi/Application"],
+    opera: ["Opera"],
+    firefox: ["Mozilla Firefox"],
+  },
+};
+
+function applicationDirs(): string[] {
+  if (process.platform === "darwin") {
+    return ["/Applications", join(homedir(), "Applications")];
+  }
+  if (process.platform === "win32") {
+    return [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA].filter(
+      (dir): dir is string => typeof dir === "string" && dir.length > 0,
+    );
+  }
+  return ["/usr/bin", "/usr/local/bin", "/snap/bin", join(homedir(), ".local", "bin")];
+}
+
+/** False only when we looked and the application was not there. */
+export function isBrowserInstalled(provider: string): boolean {
+  const candidates = BROWSER_APPS[process.platform]?.[provider];
+  if (!candidates || candidates.length === 0) return true;
+  const dirs = applicationDirs();
+  return candidates.some((candidate) => dirs.some((dir) => existsSync(join(dir, candidate))));
+}
+
+export type BrowserContribution = {
+  provider: string;
+  /** Distinct pages this browser holds, across all of its profiles. */
+  pages: number;
+  /**
+   * Pages no other browser holds. This is what switching this browser on is
+   * actually worth, and it is usually far smaller than the bookmark count: four
+   * profiles of the same import can hold a thousand bookmarks and contribute a
+   * handful of pages.
+   */
+  unique: number;
+};
+
+/**
+ * The distinct pages a set of bookmarks resolves to, keyed exactly the way the
+ * importer keys them.
+ *
+ * Deliberately computed from the browser files rather than from the database.
+ * The database only holds what has been synced, and a browser that is switched
+ * off has its saves marked removed, so a database view reports nothing for
+ * precisely the browsers someone is trying to decide about.
+ */
+export function distinctBookmarkPages(bookmarks: BrowserBookmark[]): Set<string> {
+  const pages = new Set<string>();
+  for (const bookmark of bookmarks) {
+    if (!httpOnly(bookmark.url)) continue;
+    pages.add(canonicalBookmarkUrl(bookmark.url));
+  }
+  return pages;
+}
+
+/**
+ * What each browser holds, and how much of it exists in no other browser. Takes
+ * the pages already read from disk, so nothing is read twice.
+ */
+export function browserContributions(
+  pagesByProvider: Map<string, Set<string>>,
+): BrowserContribution[] {
+  return [...pagesByProvider.entries()]
+    .map(([provider, pages]) => {
+      let unique = 0;
+      for (const page of pages) {
+        let shared = false;
+        for (const [other, otherPages] of pagesByProvider) {
+          if (other !== provider && otherPages.has(page)) {
+            shared = true;
+            break;
+          }
+        }
+        if (!shared) unique += 1;
+      }
+      return { provider, pages: pages.size, unique };
+    })
+    .sort((a, b) => a.provider.localeCompare(b.provider));
+}
+
 // Safari names its own top-level folders after internal identifiers. Anything
 // not listed here is kept verbatim; `History` is dropped because it is not a
 // bookmark list.
@@ -144,6 +260,14 @@ export function canonicalBookmarkUrl(raw: string): string {
   }
   url.protocol = url.protocol.toLowerCase();
   url.hostname = url.hostname.toLowerCase();
+  // http and https are the same page. The same link saved in two browsers rarely
+  // agrees on the scheme, and the http:// side is almost always a stale address
+  // that redirects, so keeping both splits one page into two resources.
+  //
+  // ponytail: this rewrites the resource key, and that key is also the link `get`
+  // prints and `ctrl+o` opens, so an http-only site would get an https link that
+  // fails. Rare enough to accept; a separate dedup column is the fix if it bites.
+  if (url.protocol === "http:") url.protocol = "https:";
   for (const key of [...url.searchParams.keys()]) {
     if (TRACKING_PARAMS.test(key)) url.searchParams.delete(key);
   }
@@ -614,13 +738,25 @@ export function readBrowserSource(source: BrowserSource): BrowserBookmark[] {
 
 export function syncBrowserBookmarks(db: AtlasDatabase, options: BrowserSyncOptions = {}): BrowserSyncResult {
   const all = options.sources ?? discoverBrowserSources();
-  // An explicit source list is taken as given. Otherwise config.json narrows
-  // discovery — and narrowing is all it can do, never widening. `null` means
-  // every browser; an empty array means none.
-  const enabled: string[] | null = options.enabled ?? (options.sources ? null : readConfig().browsers);
+  // An explicit source list is taken as given: it says what exists, so neither
+  // config.json nor the install check applies to it. Otherwise config.json
+  // narrows discovery — and narrowing is all it can do, never widening. `null`
+  // means every browser, an empty array means none.
+  const given = options.sources !== undefined;
+  const configured: string[] | null =
+    options.enabled ?? (given ? null : readConfig().browsers);
+  // With no choice recorded, "every browser" means every browser that is
+  // actually installed. A leftover profile of an uninstalled browser is not a
+  // browser the user has, and importing from one is how stock bookmarks appear
+  // from nowhere. An explicit choice overrides this — naming a browser is a
+  // decision, and the leftover may be exactly what someone wants.
+  const isEnabled = (provider: string): boolean => {
+    if (configured !== null) return configured.includes(provider);
+    return given || isBrowserInstalled(provider);
+  };
   const selected = all.filter(
     (source) =>
-      (enabled === null || enabled.includes(source.provider)) &&
+      isEnabled(source.provider) &&
       (!options.provider || source.provider === options.provider) &&
       (!options.profile || source.profile === options.profile),
   );
@@ -635,18 +771,17 @@ export function syncBrowserBookmarks(db: AtlasDatabase, options: BrowserSyncOpti
   };
   const now = new Date().toISOString();
 
-  // A full run is a statement about every browser, so one switched off in
-  // config.json has its bookmarks hidden here — which is what takes them out of
-  // search, recall and the palette. A scoped run says nothing about the others
-  // and must leave them alone.
-  const fullRun = enabled !== null && !options.provider && !options.profile;
-  if (fullRun) {
+  // A full run is a statement about every browser, so one that is off — switched
+  // off in config.json, or not installed at all — has its bookmarks hidden here,
+  // which is what takes them out of search, recall and the palette. A scoped run
+  // says nothing about the others and must leave them alone.
+  if (!options.provider && !options.profile) {
     const markRemoved = db.prepare(
       "UPDATE saves SET unsaved_at = ?, updated_at = ? WHERE unsaved_at IS NULL AND integration_id = ?",
     );
     for (const row of db.prepare("SELECT id, provider FROM integrations").all()) {
       const provider = String(row.provider);
-      if (!BROWSER_PROVIDERS.has(provider) || enabled.includes(provider)) continue;
+      if (!BROWSER_PROVIDERS.has(provider) || isEnabled(provider)) continue;
       const changes = Number(markRemoved.run(now, now, Number(row.id)).changes);
       result.excluded.push({ provider, removed: changes });
       result.removed += changes;
