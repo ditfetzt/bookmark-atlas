@@ -266,7 +266,14 @@ type PaletteOptions = {
 
 type Media = { type: string; path: string | null; contentType: string | null };
 
-type BookmarkDetail = Bookmark & { content: string; media: Media[] };
+/** The one picture that stands for a bookmark, whatever kind of bookmark it is. */
+type PreviewImage = { path: string; contentType: string };
+
+type BookmarkDetail = Bookmark & {
+	content: string;
+	media: Media[];
+	previewImage: PreviewImage | null;
+};
 
 type Action = { action: "cancel" } | { action: "insert"; ids: number[] };
 
@@ -371,7 +378,21 @@ function loadDetail(id: number): BookmarkDetail | null {
         FROM x_media WHERE resource_id = ? ORDER BY position, media_key
       `)
 			.all(id) as Media[];
-		return { ...bookmark, content: primary?.content ?? "", media };
+		// A README's own image or a page's og:image, captured during enrichment.
+		// It wins over X media because it is the picture that describes the page,
+		// where an X photo is one attachment among several.
+		const stored = db
+			.prepare(`
+        SELECT local_path AS path, content_type AS contentType
+        FROM resource_images WHERE resource_id = ?
+      `)
+			.get(id) as PreviewImage | undefined;
+		return {
+			...bookmark,
+			content: primary?.content ?? "",
+			media,
+			previewImage: stored?.path ? stored : null,
+		};
 	} finally {
 		db.close();
 	}
@@ -643,18 +664,20 @@ export class BookmarkPalette implements Component, Focusable {
 	private image(bookmark: Bookmark): Image | null {
 		if (this.images.has(bookmark.id)) return this.images.get(bookmark.id) ?? null;
 		let image: Image | null = null;
-		const photo = this.detail(bookmark)?.media.find(
+		const detail = this.detail(bookmark);
+		const photo = detail?.media.find(
 			(media) => media.path && (media.contentType ?? "").startsWith("image/"),
 		);
-		if (photo?.path) {
+		const source = detail?.previewImage ?? (photo?.path ? { path: photo.path, contentType: photo.contentType ?? "image/jpeg" } : null);
+		if (source) {
 			try {
-				const buffer = readFileSync(photo.path);
+				const buffer = readFileSync(source.path);
 				if (buffer.byteLength <= 5 * 1024 * 1024) {
 					image = new Image(
 						buffer.toString("base64"),
-						photo.contentType ?? "image/jpeg",
+						source.contentType,
 						{ fallbackColor: (text) => this.theme.fg("dim", text) },
-						{ maxWidthCells: 56, maxHeightCells: IMAGE_ROWS, filename: photo.path },
+						{ maxWidthCells: 56, maxHeightCells: IMAGE_ROWS, filename: source.path },
 					);
 				}
 			} catch {

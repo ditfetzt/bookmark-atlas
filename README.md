@@ -72,8 +72,8 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 | `sync browsers [--browser NAME] [--profile NAME] [--limit N]` | Import browser bookmarks from every browser found |
 | `browsers` | List the browser bookmark sources found, and whether each is readable |
 | `browsers --enable NAME,NAME \| all \| none` | Choose which browsers to import from |
-| `enrich github-readmes` | Fetch README text; incremental and ETag-aware |
-| `enrich web-pages [--limit N] [--concurrency N]` | Fetch and index the text behind browser bookmarks; blocked pages fall back to the Wayback Machine |
+| `enrich github-readmes [--limit N] [--refresh]` | Fetch README text; incremental and ETag-aware |
+| `enrich web-pages [--limit N] [--concurrency N] [--refresh]` | Fetch and index the text behind browser bookmarks; blocked pages fall back to the Wayback Machine |
 | `enrich x-posts` | Repair X titles and authors from the stored payload |
 | `import x-json <file>` | Import a Siftly or TweetXVault export |
 | `collect x [--fast]` | Full X pass via TweetXVault; `--fast` skips media |
@@ -152,6 +152,13 @@ bookmark-atlas enrich web-pages --limit 100 --concurrency 8
 This is a plain HTTP fetch, so expect roughly two thirds of a collection to yield useful text. Articles, blogs, documentation, and changelogs come through well. Pages that build themselves in JavaScript — YouTube, app dashboards — return an empty shell, and PDFs, images and login walls are not HTML at all; all of those are reported as `empty` rather than stored as content, because storing them would tell search there is something to find on a page where there is nothing.
 
 **Blocked pages fall back to the Wayback Machine.** A 403, a rate limit or a Cloudflare challenge is usually aimed at the visitor, not the page, so the newest archived snapshot is tried before the fetch is called a failure — on a real collection that recovered 4 of 5 blocked pages, including one that headless Chromium could not get past. The capture records the snapshot URL as its source, so the text always says where it came from.
+
+**Each page also contributes one preview image.** A page gives its `og:image`; a repository gives the first real image in its README, skipping the badge row. The palette draws it under the preview. `--refresh` reads a body again that its ETag would have skipped, which is how you backfill images onto pages that were indexed before this existed:
+
+```bash
+bookmark-atlas enrich web-pages --limit 100 --refresh
+bookmark-atlas enrich github-readmes --limit 100 --refresh
+```
 
 `status` shows where the work stands:
 

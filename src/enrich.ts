@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
-import { refreshResourceFts, type AtlasDatabase } from "./db.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { atlasDataDir, refreshResourceFts, type AtlasDatabase } from "./db.ts";
 import { resolveGitHubToken } from "./github.ts";
 
 type RepositoryTarget = {
@@ -16,6 +18,12 @@ export type EnrichOptions = {
   token?: string;
   /** Per-request timeout, used by the web page fetcher. */
   timeoutMs?: number;
+  /**
+   * Ignore the stored ETag and fetch the body again. Needed to backfill
+   * something new out of a body that was already read once — the preview
+   * image, for instance, which a 304 would otherwise never reveal.
+   */
+  refresh?: boolean;
 };
 
 export type EnrichResult = {
@@ -93,6 +101,69 @@ function targets(db: AtlasDatabase, limit: number): RepositoryTarget[] {
 
 type FetchTarget = { resourceId: number; etag: string | null };
 
+/** What the palette can draw. Anything else — an SVG logo, an AVIF, a video — is
+ * stored as no preview at all rather than as a file that renders as a blank row. */
+const RENDERABLE_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+function imagesDir(): string {
+  return join(atlasDataDir(), "images");
+}
+
+/**
+ * Download one preview image and remember where it landed.
+ *
+ * A picture is a nicety: every failure here is silent and returns false, because
+ * a dead image URL must never turn a successful page fetch into a failed one.
+ */
+async function saveResourceImage(
+  db: AtlasDatabase,
+  resourceId: number,
+  imageUrl: string,
+  fetchImpl: typeof fetch,
+  timeoutMs: number,
+): Promise<boolean> {
+  try {
+    const response = await fetchImpl(imageUrl, {
+      headers: { Accept: "image/*", "User-Agent": USER_AGENT },
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (!response.ok) return false;
+
+    const contentType = (response.headers.get("content-type") ?? "")
+      .split(";")[0]
+      ?.trim()
+      .toLowerCase() ?? "";
+    if (!RENDERABLE_IMAGE_TYPES.has(contentType)) return false;
+
+    const declared = Number.parseInt(response.headers.get("content-length") ?? "0", 10);
+    if (declared > MAX_IMAGE_BYTES) return false;
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) return false;
+
+    const extension = contentType.slice("image/".length).replace("jpeg", "jpg");
+    const file = join(imagesDir(), `${resourceId}-${hash(imageUrl).slice(0, 16)}.${extension}`);
+    mkdirSync(imagesDir(), { recursive: true });
+    writeFileSync(file, bytes);
+
+    db.prepare(`
+      INSERT INTO resource_images (
+        resource_id, source_url, local_path, content_type, byte_size, fetched_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(resource_id) DO UPDATE SET
+        source_url = excluded.source_url,
+        local_path = excluded.local_path,
+        content_type = excluded.content_type,
+        byte_size = excluded.byte_size,
+        fetched_at = excluded.fetched_at
+    `).run(resourceId, imageUrl, file, contentType, bytes.byteLength, new Date().toISOString());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function saveFetchState(
   db: AtlasDatabase,
   target: FetchTarget,
@@ -133,6 +204,8 @@ async function enrichOne(
   fetchImpl: typeof fetch,
   token: string,
   maxBytes: number,
+  timeoutMs: number,
+  refresh: boolean,
 ): Promise<"enriched" | "unchanged" | "missing" | "failed"> {
   const headers: Record<string, string> = {
     Accept: "application/vnd.github.raw+json",
@@ -140,7 +213,7 @@ async function enrichOne(
     "X-GitHub-Api-Version": API_VERSION,
     "User-Agent": USER_AGENT,
   };
-  if (target.etag) headers["If-None-Match"] = target.etag;
+  if (target.etag && !refresh) headers["If-None-Match"] = target.etag;
   const url = `https://api.github.com/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.name)}/readme`;
 
   try {
@@ -203,6 +276,12 @@ async function enrichOne(
       db.exec("ROLLBACK");
       throw error;
     }
+
+    // After the commit, never inside it: the image is a second request over the
+    // network, and holding a write transaction open across it would block every
+    // other enrichment running beside this one.
+    const imageUrl = readmeImageUrl(content, target.owner, target.name);
+    if (imageUrl) await saveResourceImage(db, target.resourceId, imageUrl, fetchImpl, timeoutMs);
     return "enriched";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -221,6 +300,8 @@ export async function enrichGitHubReadmes(
   const token = options.token ?? resolveGitHubToken();
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxBytes = 2 * 1024 * 1024;
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const refresh = options.refresh === true;
   const outcomes: Array<"enriched" | "unchanged" | "missing" | "failed"> = [];
   let next = 0;
 
@@ -229,7 +310,7 @@ export async function enrichGitHubReadmes(
       const target = selected[next];
       next += 1;
       if (!target) break;
-      outcomes.push(await enrichOne(db, target, fetchImpl, token, maxBytes));
+      outcomes.push(await enrichOne(db, target, fetchImpl, token, maxBytes, timeoutMs, refresh));
     }
   }
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
@@ -330,6 +411,7 @@ export type ExtractedPage = {
   title: string | null;
   description: string | null;
   text: string;
+  imageUrl: string | null;
 };
 
 function metaContent(html: string, name: string): string | null {
@@ -342,6 +424,96 @@ function metaContent(html: string, name: string): string | null {
   return decodeEntities(content).replace(/\s+/g, " ").trim() || null;
 }
 
+function linkHref(html: string, rel: string): string | null {
+  const tag = new RegExp(`<link\\b[^>]*?rel=["']${rel}["'][^>]*>`, "i").exec(html)?.[0];
+  return tag ? (/href=["']([^"']*)["']/i.exec(tag)?.[1] ?? null) : null;
+}
+
+/**
+ * The image a page offers as its own preview, resolved to an absolute URL.
+ * `og:image` is the one that matters; the rest are the fallbacks sites use when
+ * they have no Open Graph tags. An SVG is skipped because it is almost always a
+ * logo, and nothing here can draw one.
+ */
+export function pageImageUrl(html: string, pageUrl: string): string | null {
+  const raw =
+    metaContent(html, "og:image") ??
+    metaContent(html, "og:image:url") ??
+    metaContent(html, "twitter:image") ??
+    metaContent(html, "twitter:image:src") ??
+    linkHref(html, "image_src");
+  return resolveImageUrl(raw, pageUrl);
+}
+
+function resolveImageUrl(raw: string | null, base: string): string | null {
+  if (!raw) return null;
+  if (/^(?:data|blob|javascript):/i.test(raw)) return null;
+  let resolved: URL;
+  try {
+    resolved = new URL(decodeEntities(raw), base);
+  } catch {
+    return null;
+  }
+  if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null;
+  if (resolved.pathname.toLowerCase().endsWith(".svg")) return null;
+  return resolved.toString();
+}
+
+/**
+ * Badge and chart hosts. A README's first images are its build badges, and a
+ * row of shields.io pills is the last thing worth showing as a preview.
+ */
+const BADGE_HOSTS = new Set([
+  "img.shields.io",
+  "shields.io",
+  "badge.fury.io",
+  "badgen.net",
+  "badge.buildkite.com",
+  "codecov.io",
+  "coveralls.io",
+  "travis-ci.org",
+  "travis-ci.com",
+  "circleci.com",
+  "app.codacy.com",
+  "api.codacy.com",
+  "david-dm.org",
+  "snyk.io",
+  "packagephobia.com",
+  "bundlephobia.com",
+  "img.badgesize.io",
+  "sonarcloud.io",
+  "opencollective.com",
+  "isitmaintained.com",
+  "deepscan.io",
+  "star-history.com",
+  "komarev.com",
+  "visitor-badge.laobi.icu",
+  "libraries.io",
+  "www.bestpractices.dev",
+  "api.securityscorecards.dev",
+]);
+
+/**
+ * The first image a README actually illustrates itself with. Both markdown and
+ * raw `<img>` are matched in one pass so the winner is the one that appears
+ * first in the document, not the one in the form we happen to look for first.
+ */
+export function readmeImageUrl(markdown: string, owner: string, name: string): string | null {
+  const base = `https://raw.githubusercontent.com/${owner}/${name}/HEAD/`;
+  const pattern = /!\[[^\]]*\]\(\s*([^)\s]+)|<img\b[^>]*?\bsrc=["']([^"']+)["']/gi;
+  for (const match of markdown.matchAll(pattern)) {
+    const url = resolveImageUrl(match[1] ?? match[2] ?? null, base);
+    if (!url) continue;
+    try {
+      if (BADGE_HOSTS.has(new URL(url).hostname.toLowerCase())) continue;
+    } catch {
+      continue;
+    }
+    return url;
+  }
+  return null;
+}
+
 /**
  * The readable text of a page, without a dependency.
  *
@@ -351,7 +523,7 @@ function metaContent(html: string, name: string): string | null {
  * thousand pages. Pages that build themselves in JavaScript yield almost
  * nothing, which is what `MIN_USEFUL_CHARS` is there to detect.
  */
-export function extractPage(html: string): ExtractedPage {
+export function extractPage(html: string, pageUrl = ""): ExtractedPage {
   const title =
     metaContent(html, "og:title") ??
     (() => {
@@ -373,7 +545,7 @@ export function extractPage(html: string): ExtractedPage {
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 
-  return { title, description, text };
+  return { title, description, text, imageUrl: pageUrl ? pageImageUrl(html, pageUrl) : null };
 }
 
 type WebPageTarget = {
@@ -415,7 +587,7 @@ type PageFetch =
   | { kind: "unchanged" }
   | { kind: "not-text"; detail: string }
   | { kind: "too-thin"; detail: string }
-  | { kind: "ok"; content: string; etag: string | null }
+  | { kind: "ok"; content: string; etag: string | null; imageUrl: string | null }
   | { kind: "failed"; detail: string };
 
 /**
@@ -429,12 +601,13 @@ async function fetchPage(
   fetchImpl: typeof fetch,
   maxBytes: number,
   timeoutMs: number,
+  refresh: boolean,
 ): Promise<PageFetch> {
   const headers: Record<string, string> = {
     Accept: "text/html,application/xhtml+xml",
     "User-Agent": USER_AGENT,
   };
-  if (etag) headers["If-None-Match"] = etag;
+  if (etag && !refresh) headers["If-None-Match"] = etag;
 
   try {
     const response = await fetchImpl(url, {
@@ -459,12 +632,17 @@ async function fetchPage(
     }
 
     // Title and description first: on a thin page they are most of what there is.
-    const page = extractPage(body);
+    const page = extractPage(body, url);
     const content = [page.title, page.description, page.text].filter(Boolean).join("\n\n").trim();
     if (content.length < MIN_USEFUL_CHARS) {
       return { kind: "too-thin", detail: `only ${content.length} characters of readable text` };
     }
-    return { kind: "ok", content, etag: response.headers.get("etag") };
+    return {
+      kind: "ok",
+      content,
+      etag: response.headers.get("etag"),
+      imageUrl: page.imageUrl,
+    };
   } catch (error) {
     return { kind: "failed", detail: error instanceof Error ? error.message : String(error) };
   }
@@ -505,16 +683,17 @@ async function enrichWebPage(
   fetchImpl: typeof fetch,
   maxBytes: number,
   timeoutMs: number,
+  refresh: boolean,
 ): Promise<"enriched" | "unchanged" | "empty" | "failed"> {
   let sourceUrl = target.url;
   let etag = target.etag;
-  let result = await fetchPage(target.url, target.etag, fetchImpl, maxBytes, timeoutMs);
+  let result = await fetchPage(target.url, target.etag, fetchImpl, maxBytes, timeoutMs, refresh);
   if (result.kind === "ok") etag = result.etag;
 
   if (result.kind === "failed" || result.kind === "too-thin") {
     const snapshot = await waybackSnapshot(fetchImpl, target.url, timeoutMs);
     if (snapshot) {
-      const archived = await fetchPage(snapshot, null, fetchImpl, maxBytes, timeoutMs);
+      const archived = await fetchPage(snapshot, null, fetchImpl, maxBytes, timeoutMs, false);
       if (archived.kind === "ok") {
         result = archived;
         sourceUrl = snapshot;
@@ -581,6 +760,11 @@ async function enrichWebPage(
       saveFetchState(db, target, "web_page", { status: "failed", error: message });
       return "failed";
     }
+    // After the commit: the image is another network round trip, and a write
+    // transaction held across it would block every other page being fetched.
+    if (result.imageUrl) {
+      await saveResourceImage(db, target.resourceId, result.imageUrl, fetchImpl, timeoutMs);
+    }
     return "enriched";
   }
 }
@@ -599,6 +783,7 @@ export async function enrichWebPages(
   const limit = options.limit ?? 25;
   const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 8));
   const timeoutMs = options.timeoutMs ?? 15_000;
+  const refresh = options.refresh === true;
   const selected = webPageTargets(db, limit);
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxBytes = 2 * 1024 * 1024;
@@ -610,7 +795,7 @@ export async function enrichWebPages(
       const target = selected[next];
       next += 1;
       if (!target) break;
-      outcomes.push(await enrichWebPage(db, target, fetchImpl, maxBytes, timeoutMs));
+      outcomes.push(await enrichWebPage(db, target, fetchImpl, maxBytes, timeoutMs, refresh));
     }
   }
   await Promise.all(Array.from({ length: concurrency }, () => worker()));

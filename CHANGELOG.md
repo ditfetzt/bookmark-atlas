@@ -20,6 +20,8 @@ and posts, so the same search, the same recall ranking, and the same palette rea
 
 ### Added
 
+- **A preview image for every kind of bookmark, not only X posts.** A repository contributes the first real image in its README — badges, shields and logos are skipped, because a row of build pills is the last thing worth showing — and a page contributes its `og:image`. Both are downloaded once, capped at 4 MB, and stored beside the database; the palette draws whichever one the bookmark has. An SVG is refused rather than stored, because a logo is not a preview and nothing here can draw one.
+- `enrich web-pages --refresh` and `enrich github-readmes --refresh` ignore the stored ETag and read the body again. They exist for exactly the case above: a page read before preview images existed has an ETag, and a 304 would never reveal the image behind it.
 - `sync browsers`, reading the Chromium family, Safari and Firefox, with `--browser` and `--profile` to narrow the run.
 - `browsers`, which lists every source found and reports per-source read errors — the answer to "why is Safari empty?" without a stack trace.
 - A **Browsers** filter in the palette: `tab` now cycles All → GitHub → X → Browsers.

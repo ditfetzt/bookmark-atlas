@@ -52,8 +52,8 @@ Usage:
   bookmark-atlas sync browsers [--browser NAME] [--profile NAME] [--limit N]
   bookmark-atlas browsers
   bookmark-atlas browsers --enable NAME,NAME | --enable all | --enable none
-  bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
-  bookmark-atlas enrich web-pages [--limit N] [--concurrency N]
+  bookmark-atlas enrich github-readmes [--limit N] [--concurrency N] [--refresh]
+  bookmark-atlas enrich web-pages [--limit N] [--concurrency N] [--refresh]
   bookmark-atlas enrich x-posts
   bookmark-atlas import x-json <file> [--account NAME] [--reconcile]
   bookmark-atlas collect x [--account NAME] [--full] [--fast] [--keep-export]
@@ -299,7 +299,13 @@ async function main(): Promise<void> {
       if (!Number.isFinite(concurrency) || concurrency < 1) {
         throw new Error("--concurrency must be a positive integer");
       }
-      console.log(JSON.stringify(await enrichWebPages(db, { limit, concurrency }), null, 2));
+      console.log(
+        JSON.stringify(
+          await enrichWebPages(db, { limit, concurrency, refresh: args.includes("--refresh") }),
+          null,
+          2,
+        ),
+      );
       return;
     }
 
@@ -311,7 +317,11 @@ async function main(): Promise<void> {
         throw new Error("--concurrency must be a positive integer");
       }
       console.log(
-        JSON.stringify(await enrichGitHubReadmes(db, { limit, concurrency }), null, 2),
+        JSON.stringify(
+          await enrichGitHubReadmes(db, { limit, concurrency, refresh: args.includes("--refresh") }),
+          null,
+          2,
+        ),
       );
       return;
     }

@@ -146,6 +146,7 @@ the prompt automatically; the user decides when to consult.
 "$ATLAS_CLI" browsers --enable brave   # import only brave (all | none | a,b)
 "$ATLAS_CLI" enrich web-pages          # fetch page text so search reaches it (--limit 25)
                                       # blocked pages retry via the Wayback Machine
+                                      # --refresh re-reads a body its ETag would skip
 "$ATLAS_CLI" collect x                # X + all media (TweetXVault)
 "$ATLAS_CLI" collect x --fast         # text only, no media
 ```

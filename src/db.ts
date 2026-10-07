@@ -174,6 +174,21 @@ function migrate(db: AtlasDatabase): void {
       updated_at TEXT NOT NULL
     );
 
+    -- The one preview image the palette shows for a bookmark: a repository's
+    -- first real image in its README, a page's og:image, an X post's first
+    -- photo. Kept out of x_media because most of that table is X-specific
+    -- (media keys, article ids, download state) and none of it applies here.
+    -- One row per resource: this is the picture that stands for the bookmark,
+    -- not an archive of every image it ever mentioned.
+    CREATE TABLE IF NOT EXISTS resource_images (
+      resource_id INTEGER PRIMARY KEY REFERENCES resources(id) ON DELETE CASCADE,
+      source_url TEXT NOT NULL,
+      local_path TEXT NOT NULL,
+      content_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      fetched_at TEXT NOT NULL
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS resources_fts USING fts5(
       resource_id UNINDEXED,
       title,

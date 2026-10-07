@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test, { after } from "node:test";
 import { openDatabase } from "../src/db.ts";
-import { chunkMarkdown, decodeEntities, enrichGitHubReadmes, enrichWebPages, extractPage } from "../src/enrich.ts";
+import {
+  chunkMarkdown,
+  decodeEntities,
+  enrichGitHubReadmes,
+  enrichWebPages,
+  extractPage,
+  pageImageUrl,
+  readmeImageUrl,
+} from "../src/enrich.ts";
+
+// Preview images are written next to the database, so point that somewhere
+// disposable before anything asks for it. Each test file has its own process.
+const dataDir = mkdtempSync(join(tmpdir(), "atlas-enrich-"));
+process.env.BOOKMARK_ATLAS_DATA_DIR = dataDir;
+after(() => rmSync(dataDir, { recursive: true, force: true }));
 
 function seedRepository(): ReturnType<typeof openDatabase> {
   const db = openDatabase(":memory:");
@@ -308,5 +325,107 @@ test("a failed fetch does not block the next batch", async () => {
   const second = await enrichWebPages(db, { limit: 1, concurrency: 1, fetchImpl });
   assert.equal(second.enriched, 1, "the next batch moves on");
   assert.equal(second.failed, 0, "and does not retry the failure first");
+  db.close();
+});
+
+// ---------------------------------------------------------------------------
+// Preview images
+// ---------------------------------------------------------------------------
+
+const PAGE_HTML_WITH_IMAGE = `<html><head>
+<meta property="og:title" content="Tenzen">
+<meta property="og:image" content="/static/preview.png">
+</head><body><p>${PAGE_BODY}</p></body></html>`;
+
+function pngResponse(): Response {
+  // A 1x1 PNG, so the bytes are a real image rather than a placeholder.
+  const bytes = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+    "base64",
+  );
+  return new Response(bytes, { status: 200, headers: { "content-type": "image/png" } });
+}
+
+test("a page's preview image comes from og:image, resolved against the page", () => {
+  assert.equal(
+    pageImageUrl(PAGE_HTML_WITH_IMAGE, "https://example.com/blog/post"),
+    "https://example.com/static/preview.png",
+  );
+  // An SVG is a logo far more often than it is a preview, and nothing can draw one.
+  assert.equal(pageImageUrl(`<meta property="og:image" content="/logo.svg">`, "https://a.com"), null);
+  assert.equal(pageImageUrl(`<meta name="twitter:image" content="https://a.com/x.jpg">`, "https://a.com"), "https://a.com/x.jpg");
+  assert.equal(pageImageUrl("<html></html>", "https://a.com"), null);
+});
+
+test("a README's preview image skips the badge row", () => {
+  const readme = [
+    "# Atlas",
+    "",
+    "[![build](https://img.shields.io/badge/build-passing-green)](https://ci.example.com)",
+    "[![coverage](https://codecov.io/gh/example/atlas/branch/main/graph/badge.svg)](https://codecov.io)",
+    "![screenshot](./docs/screenshot.png)",
+    "![second](./docs/other.png)",
+  ].join("\n");
+
+  assert.equal(
+    readmeImageUrl(readme, "example", "atlas"),
+    "https://raw.githubusercontent.com/example/atlas/HEAD/docs/screenshot.png",
+    "the first real illustration wins, not the first image",
+  );
+  assert.equal(readmeImageUrl("# Nothing here", "example", "atlas"), null);
+});
+
+test("the preview image is downloaded and recorded, and never fails the page", async () => {
+  const db = seedPages();
+  const fetchImpl: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith("preview.png")) return pngResponse();
+    return htmlResponse(PAGE_HTML_WITH_IMAGE);
+  };
+
+  const result = await enrichWebPages(db, { limit: 1, concurrency: 1, fetchImpl });
+  assert.equal(result.enriched, 1);
+
+  const stored = db
+    .prepare("SELECT source_url, local_path, content_type FROM resource_images WHERE resource_id = 1")
+    .get() as { source_url: string; local_path: string; content_type: string };
+  assert.equal(stored.source_url, "https://example.com/static/preview.png");
+  assert.equal(stored.content_type, "image/png");
+  assert.ok(existsSync(stored.local_path), "the bytes are on disk where the palette can read them");
+  db.close();
+});
+
+test("an image URL that is not an image is not stored as a preview", async () => {
+  const db = seedPages();
+  // A tracker, a hotlink blocker, or a page that answers every URL with HTML.
+  const fetchImpl: typeof fetch = async (input) =>
+    String(input).endsWith("preview.png") ? htmlResponse("<html>not an image</html>") : htmlResponse(PAGE_HTML_WITH_IMAGE);
+
+  await enrichWebPages(db, { limit: 1, concurrency: 1, fetchImpl });
+
+  assert.equal(
+    (db.prepare("SELECT COUNT(*) AS c FROM resource_images").get() as { c: number }).c,
+    0,
+    "a row would make the palette try to draw a file that is not a picture",
+  );
+  db.close();
+});
+
+test("--refresh fetches a body again that the ETag would have skipped", async () => {
+  // The reason the flag exists: a page read before preview images existed has an
+  // ETag and no image, and a 304 would never reveal one.
+  const db = seedPages();
+  let conditional = 0;
+  const fetchImpl: typeof fetch = async (input, init) => {
+    if (String(input).endsWith("preview.png")) return pngResponse();
+    if ((init?.headers as Record<string, string>)["If-None-Match"]) conditional += 1;
+    return htmlResponse(PAGE_HTML_WITH_IMAGE, '"page-1"');
+  };
+
+  await enrichWebPages(db, { limit: 1, concurrency: 1, fetchImpl });
+  const again = await enrichWebPages(db, { limit: 1, concurrency: 1, fetchImpl, refresh: true });
+
+  assert.equal(again.enriched, 1, "the body is read again rather than answered with a 304");
+  assert.equal(conditional, 0, "--refresh sends no If-None-Match at all");
   db.close();
 });
