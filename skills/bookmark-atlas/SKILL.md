@@ -144,6 +144,7 @@ the prompt automatically; the user decides when to consult.
 "$ATLAS_CLI" sync browsers            # bookmarks from Chrome, Safari, Firefox
 "$ATLAS_CLI" browsers                 # what was found, and which are switched on
 "$ATLAS_CLI" browsers --enable brave   # import only brave (all | none | a,b)
+"$ATLAS_CLI" enrich web-pages          # fetch page text so search reaches it (--limit 25)
 "$ATLAS_CLI" collect x                # X + all media (TweetXVault)
 "$ATLAS_CLI" collect x --fast         # text only, no media
 ```

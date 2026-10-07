@@ -14,6 +14,8 @@ export type EnrichOptions = {
   concurrency?: number;
   fetchImpl?: typeof fetch;
   token?: string;
+  /** Per-request timeout, used by the web page fetcher. */
+  timeoutMs?: number;
 };
 
 export type EnrichResult = {
@@ -25,6 +27,15 @@ export type EnrichResult = {
 };
 
 const API_VERSION = "2026-03-10";
+
+// A real, honest User-Agent. Sites that block unknown clients are within their
+// rights to; announcing what this is gives them something to allow.
+const USER_AGENT = "bookmark-atlas (+https://github.com/ditfetzt/bookmark-atlas)";
+
+// Below this, a page yielded nothing worth indexing: a JavaScript shell, a
+// consent wall, a PDF served as HTML. Storing it would tell search there is
+// content on a page where there is none.
+const MIN_USEFUL_CHARS = 200;
 
 function hash(text: string): string {
   return createHash("sha256").update(text).digest("hex");
@@ -61,6 +72,10 @@ export function chunkMarkdown(content: string, maxChars = 4_000): string[] {
 }
 
 function targets(db: AtlasDatabase, limit: number): RepositoryTarget[] {
+  // Ordered by when each was last looked at, not by whether it succeeded. A
+  // failed fetch never records a success, so ordering on success would put the
+  // same failures at the front of every batch and a `--limit` run would never
+  // reach the pages behind them.
   return db.prepare(`
     SELECT g.resource_id AS resourceId, g.owner, g.name, f.etag
     FROM github_repositories g
@@ -69,15 +84,19 @@ function targets(db: AtlasDatabase, limit: number): RepositoryTarget[] {
       ON f.resource_id = g.resource_id AND f.kind = 'github_readme'
     GROUP BY g.resource_id
     ORDER BY
-      CASE WHEN f.last_success_at IS NULL THEN 0 ELSE 1 END,
+      CASE WHEN f.last_checked_at IS NULL THEN 0 ELSE 1 END,
+      f.last_checked_at ASC,
       MAX(s.saved_at) DESC
     LIMIT ?
   `).all(limit) as RepositoryTarget[];
 }
 
+type FetchTarget = { resourceId: number; etag: string | null };
+
 function saveFetchState(
   db: AtlasDatabase,
-  target: RepositoryTarget,
+  target: FetchTarget,
+  kind: string,
   values: {
     etag?: string | null;
     status: string;
@@ -90,7 +109,7 @@ function saveFetchState(
     INSERT INTO resource_fetch_state (
       resource_id, kind, etag, status, last_checked_at,
       last_success_at, error_message
-    ) VALUES (?, 'github_readme', ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(resource_id, kind) DO UPDATE SET
       etag = COALESCE(excluded.etag, resource_fetch_state.etag),
       status = excluded.status,
@@ -99,6 +118,7 @@ function saveFetchState(
       error_message = excluded.error_message
   `).run(
     target.resourceId,
+    kind,
     values.etag ?? target.etag,
     values.status,
     now,
@@ -118,7 +138,7 @@ async function enrichOne(
     Accept: "application/vnd.github.raw+json",
     Authorization: `Bearer ${token}`,
     "X-GitHub-Api-Version": API_VERSION,
-    "User-Agent": "bookmark-atlas/0.1",
+    "User-Agent": USER_AGENT,
   };
   if (target.etag) headers["If-None-Match"] = target.etag;
   const url = `https://api.github.com/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.name)}/readme`;
@@ -126,11 +146,11 @@ async function enrichOne(
   try {
     const response = await fetchImpl(url, { headers });
     if (response.status === 304) {
-      saveFetchState(db, target, { status: "unchanged", success: true });
+      saveFetchState(db, target, "github_readme", { status: "unchanged", success: true });
       return "unchanged";
     }
     if (response.status === 404) {
-      saveFetchState(db, target, { status: "missing" });
+      saveFetchState(db, target, "github_readme", { status: "missing" });
       return "missing";
     }
     if (!response.ok) {
@@ -172,7 +192,7 @@ async function enrichOne(
       for (const [ordinal, chunk] of chunkMarkdown(content).entries()) {
         insertChunk.run(capture.id, ordinal, chunk, Math.ceil(chunk.length / 4), hash(chunk));
       }
-      saveFetchState(db, target, {
+      saveFetchState(db, target, "github_readme", {
         etag: response.headers.get("etag"),
         status: "available",
         success: true,
@@ -186,7 +206,7 @@ async function enrichOne(
     return "enriched";
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    saveFetchState(db, target, { status: "failed", error: message });
+    saveFetchState(db, target, "github_readme", { status: "failed", error: message });
     return "failed";
   }
 }
@@ -219,6 +239,312 @@ export async function enrichGitHubReadmes(
     enriched: outcomes.filter((value) => value === "enriched").length,
     unchanged: outcomes.filter((value) => value === "unchanged").length,
     missing: outcomes.filter((value) => value === "missing").length,
+    failed: outcomes.filter((value) => value === "failed").length,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Web pages
+// ---------------------------------------------------------------------------
+
+/**
+ * The named entities worth knowing. Numeric ones are handled separately, and
+ * anything missing is left as written rather than dropped, so an unknown entity
+ * shows up as `&foo;` instead of silently vanishing from the text.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  mdash: "—",
+  ndash: "–",
+  hellip: "…",
+  lsquo: "‘",
+  rsquo: "’",
+  ldquo: "“",
+  rdquo: "”",
+  middot: "·",
+  bull: "•",
+  dagger: "†",
+  copy: "©",
+  reg: "®",
+  trade: "™",
+  deg: "°",
+  plusmn: "±",
+  times: "×",
+  divide: "÷",
+  minus: "−",
+  frac12: "½",
+  laquo: "«",
+  raquo: "»",
+  euro: "€",
+  pound: "£",
+  yen: "¥",
+  sect: "§",
+  para: "¶",
+  szlig: "ß",
+  auml: "ä",
+  ouml: "ö",
+  uuml: "ü",
+  Auml: "Ä",
+  Ouml: "Ö",
+  Uuml: "Ü",
+  eacute: "é",
+  egrave: "è",
+  agrave: "à",
+  ccedil: "ç",
+};
+
+export function decodeEntities(input: string): string {
+  return input.replace(/&(#\d+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, body: string) => {
+    if (body.startsWith("#")) {
+      const code =
+        body[1] === "x" || body[1] === "X"
+          ? Number.parseInt(body.slice(2), 16)
+          : Number.parseInt(body.slice(1), 10);
+      // fromCodePoint throws outside the Unicode range, and a malformed entity
+      // should survive as text rather than take the whole page down.
+      return Number.isFinite(code) && code > 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : match;
+    }
+    return NAMED_ENTITIES[body] ?? match;
+  });
+}
+
+/** Elements whose contents are never readable text. */
+const DROPPED_ELEMENTS =
+  /<(script|style|noscript|template|svg|iframe|object|embed|head)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+
+/**
+ * Block-level elements become line breaks, so paragraphs do not run together
+ * into one unreadable line. Without this, a page's whole body is a single blob.
+ */
+const BLOCK_ELEMENTS =
+  /<\/?(?:p|div|br|li|ul|ol|dl|dt|dd|tr|td|th|table|thead|tbody|h[1-6]|section|article|header|footer|nav|aside|blockquote|pre|figure|figcaption|hr|form|main|details|summary|address)\b[^>]*>/gi;
+
+export type ExtractedPage = {
+  title: string | null;
+  description: string | null;
+  text: string;
+};
+
+function metaContent(html: string, name: string): string | null {
+  // Attribute order varies between sites, so find the tag by its name and then
+  // take the content from anywhere inside it.
+  const tag = new RegExp(`<meta\\b[^>]*?(?:name|property)=["']${name}["'][^>]*>`, "i").exec(html)?.[0];
+  if (!tag) return null;
+  const content = /content=["']([^"']*)["']/i.exec(tag)?.[1];
+  if (!content) return null;
+  return decodeEntities(content).replace(/\s+/g, " ").trim() || null;
+}
+
+/**
+ * The readable text of a page, without a dependency.
+ *
+ * Deliberately not a real HTML parser: it strips what is never text, turns block
+ * boundaries into newlines, and drops the rest of the markup. That is enough for
+ * articles, documentation and changelogs, and it costs nothing to run over a
+ * thousand pages. Pages that build themselves in JavaScript yield almost
+ * nothing, which is what `MIN_USEFUL_CHARS` is there to detect.
+ */
+export function extractPage(html: string): ExtractedPage {
+  const title =
+    metaContent(html, "og:title") ??
+    (() => {
+      const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+      if (!match?.[1]) return null;
+      return decodeEntities(match[1]).replace(/\s+/g, " ").trim() || null;
+    })();
+  const description = metaContent(html, "description") ?? metaContent(html, "og:description");
+
+  const text = decodeEntities(
+    html
+      .replace(/<!--[\s\S]*?-->/g, " ")
+      .replace(DROPPED_ELEMENTS, " ")
+      .replace(BLOCK_ELEMENTS, "\n")
+      .replace(/<[^>]*>/g, " "),
+  )
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ *\n */g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
+  return { title, description, text };
+}
+
+type WebPageTarget = {
+  resourceId: number;
+  url: string;
+  etag: string | null;
+};
+
+export type WebPageEnrichResult = {
+  selected: number;
+  enriched: number;
+  unchanged: number;
+  /** Fetched, but the page had no readable text: a JavaScript shell, a PDF, an image. */
+  empty: number;
+  failed: number;
+};
+
+function webPageTargets(db: AtlasDatabase, limit: number): WebPageTarget[] {
+  // Ordered by when each was last looked at, so a batch makes progress. A page
+  // that failed records no success, and ordering on success would put the same
+  // failures at the front of every batch.
+  return db.prepare(`
+    SELECT r.id AS resourceId, r.canonical_url AS url, f.etag
+    FROM resources r
+    JOIN saves s ON s.resource_id = r.id AND s.unsaved_at IS NULL
+    LEFT JOIN resource_fetch_state f
+      ON f.resource_id = r.id AND f.kind = 'web_page'
+    WHERE r.resource_type = 'web_page'
+    GROUP BY r.id
+    ORDER BY
+      CASE WHEN f.last_checked_at IS NULL THEN 0 ELSE 1 END,
+      f.last_checked_at ASC,
+      MAX(s.saved_at) DESC
+    LIMIT ?
+  `).all(limit) as WebPageTarget[];
+}
+
+async function enrichWebPage(
+  db: AtlasDatabase,
+  target: WebPageTarget,
+  fetchImpl: typeof fetch,
+  maxBytes: number,
+  timeoutMs: number,
+): Promise<"enriched" | "unchanged" | "empty" | "failed"> {
+  const headers: Record<string, string> = {
+    Accept: "text/html,application/xhtml+xml",
+    "User-Agent": USER_AGENT,
+  };
+  if (target.etag) headers["If-None-Match"] = target.etag;
+
+  try {
+    const response = await fetchImpl(target.url, {
+      headers,
+      redirect: "follow",
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    if (response.status === 304) {
+      saveFetchState(db, target, "web_page", { status: "unchanged", success: true });
+      return "unchanged";
+    }
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} ${response.statusText}`);
+    }
+
+    const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
+    if (!contentType.includes("html") && !contentType.includes("text/plain")) {
+      // A PDF, an image, a JSON endpoint: there is no page here to read.
+      saveFetchState(db, target, "web_page", {
+        status: "not-text",
+        error: `content-type: ${contentType || "unknown"}`,
+      });
+      return "empty";
+    }
+
+    const declaredLength = Number.parseInt(response.headers.get("content-length") ?? "0", 10);
+    if (declaredLength > maxBytes) throw new Error(`page exceeds ${maxBytes} byte limit`);
+    const body = await response.text();
+    if (Buffer.byteLength(body, "utf8") > maxBytes) {
+      throw new Error(`page exceeds ${maxBytes} byte limit`);
+    }
+
+    const page = extractPage(body);
+    // Title and description first: on a thin page they are most of what there is.
+    const content = [page.title, page.description, page.text].filter(Boolean).join("\n\n").trim();
+    if (content.length < MIN_USEFUL_CHARS) {
+      saveFetchState(db, target, "web_page", {
+        status: "empty",
+        error: `only ${content.length} characters of readable text`,
+      });
+      return "empty";
+    }
+
+    const contentHash = hash(content);
+    const fetchedAt = new Date().toISOString();
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.prepare(`
+        INSERT INTO captures (
+          resource_id, kind, source_url, fetched_at, content_hash, normalized_content
+        ) VALUES (?, 'web_page', ?, ?, ?, ?)
+        ON CONFLICT(resource_id, kind, content_hash) DO UPDATE SET
+          fetched_at = excluded.fetched_at
+      `).run(target.resourceId, target.url, fetchedAt, contentHash, content);
+      const capture = db
+        .prepare(
+          "SELECT id FROM captures WHERE resource_id = ? AND kind = 'web_page' AND content_hash = ?",
+        )
+        .get(target.resourceId, contentHash) as { id: number };
+
+      db.prepare("DELETE FROM chunks WHERE capture_id = ?").run(capture.id);
+      const insertChunk = db.prepare(`
+        INSERT INTO chunks (capture_id, ordinal, text, token_count, content_hash)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      for (const [ordinal, chunk] of chunkMarkdown(content).entries()) {
+        insertChunk.run(capture.id, ordinal, chunk, Math.ceil(chunk.length / 4), hash(chunk));
+      }
+      saveFetchState(db, target, "web_page", {
+        etag: response.headers.get("etag"),
+        status: "available",
+        success: true,
+      });
+      refreshResourceFts(db, target.resourceId);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    return "enriched";
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    saveFetchState(db, target, "web_page", { status: "failed", error: message });
+    return "failed";
+  }
+}
+
+/**
+ * Fetch and index the text behind browser bookmarks.
+ *
+ * Batches are the point: `--limit` with the ordering above walks the collection
+ * once, so a run of 25 costs 25 fetches and the next run continues where this
+ * one stopped instead of retrying its failures forever.
+ */
+export async function enrichWebPages(
+  db: AtlasDatabase,
+  options: EnrichOptions = {},
+): Promise<WebPageEnrichResult> {
+  const limit = options.limit ?? 25;
+  const concurrency = Math.max(1, Math.min(options.concurrency ?? 4, 8));
+  const timeoutMs = options.timeoutMs ?? 15_000;
+  const selected = webPageTargets(db, limit);
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const maxBytes = 2 * 1024 * 1024;
+  const outcomes: Array<"enriched" | "unchanged" | "empty" | "failed"> = [];
+  let next = 0;
+
+  async function worker(): Promise<void> {
+    while (next < selected.length) {
+      const target = selected[next];
+      next += 1;
+      if (!target) break;
+      outcomes.push(await enrichWebPage(db, target, fetchImpl, maxBytes, timeoutMs));
+    }
+  }
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+
+  return {
+    selected: selected.length,
+    enriched: outcomes.filter((value) => value === "enriched").length,
+    unchanged: outcomes.filter((value) => value === "unchanged").length,
+    empty: outcomes.filter((value) => value === "empty").length,
     failed: outcomes.filter((value) => value === "failed").length,
   };
 }

@@ -4,7 +4,7 @@ import { syncGitHubStars } from "./github.ts";
 import { getResource, searchResources } from "./search.ts";
 import { recall, relatedResources } from "./recall.ts";
 import { collectStage } from "./stage.ts";
-import { enrichGitHubReadmes } from "./enrich.ts";
+import { enrichGitHubReadmes, enrichWebPages } from "./enrich.ts";
 import { importXJsonFile, repairXPosts } from "./x.ts";
 import { collectXBookmarks } from "./collector.ts";
 import { BROWSER_PROVIDERS, browserContributions, discoverBrowserSources, distinctBookmarkPages, isBrowserInstalled, readBrowserSource, syncBrowserBookmarks } from "./browsers.ts";
@@ -53,6 +53,7 @@ Usage:
   bookmark-atlas browsers
   bookmark-atlas browsers --enable NAME,NAME | --enable all | --enable none
   bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
+  bookmark-atlas enrich web-pages [--limit N] [--concurrency N]
   bookmark-atlas enrich x-posts
   bookmark-atlas import x-json <file> [--account NAME] [--reconcile]
   bookmark-atlas collect x [--account NAME] [--full] [--fast] [--keep-export]
@@ -288,6 +289,17 @@ async function main(): Promise<void> {
 
     if (command === "enrich" && args[1] === "x-posts") {
       console.log(JSON.stringify(repairXPosts(db), null, 2));
+      return;
+    }
+
+    if (command === "enrich" && args[1] === "web-pages") {
+      const limit = Number.parseInt(optionValue(args, "--limit") ?? "25", 10);
+      const concurrency = Number.parseInt(optionValue(args, "--concurrency") ?? "4", 10);
+      if (!Number.isFinite(limit) || limit < 1) throw new Error("--limit must be a positive integer");
+      if (!Number.isFinite(concurrency) || concurrency < 1) {
+        throw new Error("--concurrency must be a positive integer");
+      }
+      console.log(JSON.stringify(await enrichWebPages(db, { limit, concurrency }), null, 2));
       return;
     }
 

@@ -73,6 +73,7 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 | `browsers` | List the browser bookmark sources found, and whether each is readable |
 | `browsers --enable NAME,NAME \| all \| none` | Choose which browsers to import from |
 | `enrich github-readmes` | Fetch README text; incremental and ETag-aware |
+| `enrich web-pages [--limit N] [--concurrency N]` | Fetch and index the text behind browser bookmarks |
 | `enrich x-posts` | Repair X titles and authors from the stored payload |
 | `import x-json <file>` | Import a Siftly or TweetXVault export |
 | `collect x [--fast]` | Full X pass via TweetXVault; `--fast` skips media |
@@ -136,6 +137,21 @@ The picker shows what each browser is *worth*, not how many bookmarks it holds:
 The choice lives in `config.json` beside the database. Switching a browser off **hides its bookmarks from search and recall**, because `tab` only filters what you see while search and recall rank everything. The saves are marked removed rather than deleted, so switching the browser back on restores them — `prune` is what actually deletes. A browser that is off is also not synced.
 
 **Only `http` and `https` are imported.** `javascript:`, `chrome://`, and `file://` entries are counted and skipped — they cannot be fetched, and they are not pages. `http` and `https` for the same host are treated as one page, because the same link saved in two browsers rarely agrees on the scheme and one side is usually a stale address that redirects.
+
+### Indexing the pages themselves
+
+A bookmark starts as a title and a URL. `enrich web-pages` fetches each page and indexes its text, so search reaches what is **on** the page and not only what it is called.
+
+```bash
+bookmark-atlas enrich web-pages --limit 25
+bookmark-atlas enrich web-pages --limit 100 --concurrency 8
+```
+
+**Batches are the point.** Each run walks the collection once, so `--limit 25` costs 25 fetches and the next run continues where that one stopped rather than retrying its failures forever. Re-runs are incremental — a page that has not changed is skipped on its ETag.
+
+This is a plain HTTP fetch, so expect roughly two thirds of a collection to yield useful text. Articles, blogs, documentation, and changelogs come through well. Pages that build themselves in JavaScript — YouTube, app dashboards — return an empty shell, and PDFs, images and login walls are not HTML at all; all of those are reported as `empty` rather than stored as content, because storing them would tell search there is something to find on a page where there is nothing.
+
+No dependency is involved: the HTML is reduced to text by a small extractor that drops `script`/`style`/comments, turns block boundaries into line breaks, and decodes entities.
 
 ## Recall — bookmarks as context for the agent
 
