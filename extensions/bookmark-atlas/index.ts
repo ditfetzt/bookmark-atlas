@@ -86,10 +86,14 @@ const LIST_ROWS = 10;
 const RECENT_DAYS = 7;
 const TOPIC_LIMIT = 60;
 const EXCERPT_ROWS = 5;
+// The image is always given these rows, so the overlay keeps one height as you
+// move down the list. It must match the Image's maxHeightCells: the renderer
+// returns exactly that many lines, and the kitty/iTerm sequence draws all of
+// them, so a larger image would be painted over the bottom border.
 const IMAGE_ROWS = 10;
-// The reading pane trades the list, its separator and the image for more text, so
-// the overlay keeps the same height.
-const READING_ROWS = LIST_ROWS + 1 + EXCERPT_ROWS + 1 + IMAGE_ROWS;
+// The reading pane trades the list and its separator for more text, so the
+// overlay keeps the same height. The image keeps its rows in both views.
+const READING_ROWS = LIST_ROWS + 1 + EXCERPT_ROWS;
 
 type RecallHit = {
 	id: number;
@@ -650,7 +654,7 @@ export class BookmarkPalette implements Component, Focusable {
 						buffer.toString("base64"),
 						photo.contentType ?? "image/jpeg",
 						{ fallbackColor: (text) => this.theme.fg("dim", text) },
-						{ maxWidthCells: 56, maxHeightCells: 12, filename: photo.path },
+						{ maxWidthCells: 56, maxHeightCells: IMAGE_ROWS, filename: photo.path },
 					);
 				}
 			} catch {
@@ -1462,12 +1466,12 @@ export class BookmarkPalette implements Component, Focusable {
 			lines.push(row(theme.fg("text", excerptLines[offset + index] ?? "")));
 		}
 
-		if (!reading) {
-			lines.push(row(""));
-			const imageLines = bookmark ? (this.image(bookmark)?.render(innerWidth) ?? []) : [];
-			for (let index = 0; index < IMAGE_ROWS; index += 1) {
-				lines.push(row(imageLines[index] ?? ""));
-			}
+		lines.push(row(""));
+		// The image stays visible while reading: the rows the list gave up go to
+		// text, and the rows the image gave up stay with the image.
+		const imageLines = bookmark ? (this.image(bookmark)?.render(innerWidth) ?? []) : [];
+		for (let index = 0; index < IMAGE_ROWS; index += 1) {
+			lines.push(row(imageLines[index] ?? ""));
 		}
 
 		lines.push(theme.fg("border", `└${"─".repeat(width - 2)}┘`));

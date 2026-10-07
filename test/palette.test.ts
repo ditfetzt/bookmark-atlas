@@ -11,6 +11,15 @@ const PAGE_DOWN = "\x1b[6~";
 const CMD_UP = "\x1b[1;9A";
 const CMD_DOWN = "\x1b[1;9B";
 const TAB = "\t";
+const IMAGE_MARKER = "<image>";
+
+/** Render is only exercised by the layout test, so the theme just passes text through. */
+const FAKE_THEME = {
+  fg: (_color: string, text: string) => text,
+  bg: (_color: string, text: string) => text,
+  bold: (text: string) => text,
+  fallbackColor: (text: string) => text,
+};
 
 type Harness = {
   handleInput(data: string): void;
@@ -61,7 +70,7 @@ function paletteItems(seeds: ItemSeed[], options: Record<string, unknown> = {}):
   const actions: unknown[] = [];
   const palette = new BookmarkPalette(
     items as never,
-    {} as never,
+    FAKE_THEME as never,
     (action) => actions.push(action),
     options as never,
   ) as unknown as Harness;
@@ -276,6 +285,39 @@ test("enter still inserts from the reading pane", () => {
   list.handleInput(CTRL_E);
   list.handleInput("\r");
   assert.deepEqual(list.actions, [{ action: "insert", ids: [1] }]);
+});
+
+test("the preview image survives ctrl+e and the overlay keeps one height", () => {
+  // The reading pane trades the list and its separator for text. It must not
+  // trade the image too: an image whose rows are not reserved is drawn over the
+  // bottom border, because the terminal paints all of its rows regardless.
+  const list = paletteOf(["Bookmark one"]);
+  const layout = list as unknown as {
+    render(width: number): string[];
+    detail(): { content: string; media: unknown[] };
+    image(): { render(width: number): string[] };
+  };
+  layout.detail = () => ({ content: "word ".repeat(4000), media: [] });
+  layout.image = () => ({ render: () => [IMAGE_MARKER, ...Array.from({ length: 9 }, () => "")] });
+
+  const listLines = layout.render(100);
+  list.handleInput(CTRL_E);
+  const readingLines = layout.render(100);
+
+  assert.equal(listLines.length, readingLines.length, "the overlay keeps one height");
+  assert.ok(
+    listLines.some((line) => line.includes(IMAGE_MARKER)),
+    "the image shows in the list view",
+  );
+  assert.ok(
+    readingLines.some((line) => line.includes(IMAGE_MARKER)),
+    "and stays visible while reading the full text",
+  );
+  // The image block sits above the bottom border in both views.
+  assert.equal(
+    listLines.findIndex((line) => line.includes("└")),
+    readingLines.findIndex((line) => line.includes("└")),
+  );
 });
 
 test("ctrl+x marks rows so enter inserts them together", () => {
