@@ -833,7 +833,11 @@ export class BookmarkPalette implements Component, Focusable {
 			picker.index = 0;
 		} else if (matchesKey(data, "end")) {
 			picker.index = last;
-		} else if (matchesKey(data, "space")) {
+		} else if (matchesKey(data, "space") || data === " ") {
+			// Both forms, because pi's own selectable lists compare the raw string
+			// while its examples use the key name. Checking only one leaves the
+			// toggle silently dead: a miss falls through to the return below, so
+			// nothing re-renders and the key looks ignored.
 			const entry = picker.entries[picker.index];
 			if (entry) entry.enabled = !entry.enabled;
 		} else if (matchesKey(data, "return")) {

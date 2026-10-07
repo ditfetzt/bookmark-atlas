@@ -373,6 +373,7 @@ test("ctrl+b folds browser profiles into one row each and saves the choice", asy
   // The picker is opened with `void`, so a test waits a macrotask for the CLI
   // round trip that fills it.
   const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  let renders = 0;
   const { calls, run } = fakeRunner((args) => {
     if (args[0] === "browsers" && args[1] !== "--enable") {
       return {
@@ -389,7 +390,7 @@ test("ctrl+b folds browser profiles into one row each and saves the choice", asy
     if (args[0] === "sync") return { ok: true, stdout: JSON.stringify({ removed: 517 }) };
     return { ok: true, stdout: "{}" };
   });
-  const list = palette(3, { cliRunner: run });
+  const list = palette(3, { cliRunner: run, requestRender: () => { renders += 1; } });
 
   list.handleInput(CTRL_B);
   await flush();
@@ -404,8 +405,10 @@ test("ctrl+b folds browser profiles into one row each and saves the choice", asy
   );
 
   list.handleInput(DOWN);
+  const before = renders;
   list.handleInput(" ");
   assert.equal(list.browserPicker?.entries[1]?.enabled, false, "space toggles the row");
+  assert.ok(renders > before, "and the toggle repaints, rather than looking ignored");
 
   list.handleInput("\r");
   await flush();
