@@ -1,49 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 820 240" width="820" height="240" role="img" aria-labelledby="atlas-title atlas-desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 600" width="1000" height="600" role="img" aria-labelledby="atlas-title atlas-desc">
   <title id="atlas-title">The Bookmark Atlas /bookmarks palette</title>
-  <desc id="atlas-desc">A search query is typed into the /bookmarks palette. As it types, the list narrows to the two bookmarks that match, the other rows dim, and the selection moves to the second match.</desc>
+  <desc id="atlas-desc">The /bookmarks palette narrowed to browser bookmarks. A query is typed, the list drops to the two pages that match, the other rows dim, and the selected page's own preview image is drawn beneath its text.</desc>
 
   <defs>
     <style>
-      .ui    { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
-      .prompt{ font-size: 15px; fill: #7ee787; }
-      .query { font-size: 15px; fill: #e6edf3; }
-      .idx   { font-size: 13px; fill: #6e7681; }
-      .title { font-size: 14px; fill: #e6edf3; }
-      .meta  { font-size: 12px; fill: #8b949e; }
-      .cursor{ fill: #7ee787; }
+      .ui      { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+      .brand   { font-size: 16px; font-weight: 600; fill: #7ee787; }
+      .count   { font-size: 13px; fill: #8b949e; }
+      .query   { font-size: 15px; fill: #e6edf3; }
+      .chip    { font-size: 13px; fill: #8b949e; }
+      .chip-on { font-size: 13px; fill: #7ee787; }
+      .toggle  { font-size: 13px; fill: #8b949e; }
+      .idx     { font-size: 13px; fill: #6e7681; }
+      .date    { font-size: 13px; fill: #8b949e; }
+      .title   { font-size: 14px; fill: #e6edf3; }
+      .dtitle  { font-size: 15px; font-weight: 600; fill: #7ee787; }
+      .url     { font-size: 13px; fill: #79c0ff; }
+      .meta    { font-size: 12px; fill: #8b949e; }
+      .excerpt { font-size: 13px; fill: #e6edf3; }
+      .help    { font-size: 12px; fill: #8b949e; }
+      .cursor  { fill: #7ee787; }
 
-      /* One 8s loop: rest, type, narrow, move the selection, hold, reset. */
-      #query-group  { animation: queryFade 8s ease-in-out infinite; }
+      /* One 8s loop: rest, type, narrow, hold, reset. */
       #typed rect   { animation: type 8s steps(1, end) infinite; }
+      #query-group  { animation: queryFade 8s ease-in-out infinite; }
       #cursor       { animation: blink 1.06s step-end infinite; }
-      #highlight    { animation: slide 8s cubic-bezier(.4,0,.2,1) infinite; }
+      #count-before { animation: countOut 8s ease-in-out infinite; }
+      #count-after  { animation: countIn 8s ease-in-out infinite; }
       .unmatched    { animation: dim 8s ease-in-out infinite; }
 
       @keyframes type {
         0%, 6%      { width: 0px; }
-        7.11%       { width: 9px; }
-        8.21%       { width: 18px; }
-        9.32%       { width: 27px; }
-        10.42%      { width: 36px; }
-        11.53%      { width: 45px; }
-        12.63%      { width: 54px; }
-        13.74%      { width: 63px; }
-        14.84%      { width: 72px; }
-        15.95%      { width: 81px; }
-        17.05%      { width: 90px; }
-        18.16%      { width: 99px; }
-        19.26%      { width: 108px; }
-        20.37%      { width: 117px; }
-        21.47%      { width: 126px; }
-        22.58%      { width: 135px; }
-        23.68%      { width: 144px; }
-        24.79%      { width: 153px; }
-        25.89%      { width: 162px; }
-        27%, 88%    { width: 171px; }
+        9.09%       { width: 9px; }
+        11.18%      { width: 18px; }
+        13.27%      { width: 27px; }
+        15.36%      { width: 36px; }
+        17.45%      { width: 45px; }
+        19.54%      { width: 54px; }
+        21.63%      { width: 63px; }
+        23.72%      { width: 72px; }
+        25.81%      { width: 81px; }
+        27.9%       { width: 90px; }
+        29.9%, 88%  { width: 112px; }
         88.1%, 100% { width: 0px; }
       }
       @keyframes queryFade {
-        0%, 82%     { opacity: 1; }
+        0%, 84%     { opacity: 1; }
         88%         { opacity: 0; }
         88.1%       { opacity: 0; }
         92%, 100%   { opacity: 1; }
@@ -53,74 +55,138 @@
         50%, 100%   { opacity: 0; }
       }
       @keyframes dim {
-        0%, 32%     { opacity: .8; }
-        38%, 82%    { opacity: .2; }
-        88%, 100%   { opacity: .8; }
+        0%, 32%     { opacity: .85; }
+        38%, 84%    { opacity: .18; }
+        90%, 100%   { opacity: .85; }
       }
-      @keyframes slide {
-        0%, 40%     { transform: translateY(0); }
-        48%, 82%    { transform: translateY(34px); }
-        88%, 100%   { transform: translateY(0); }
+      @keyframes countOut {
+        0%, 31%     { opacity: 1; }
+        35%, 100%   { opacity: 0; }
+      }
+      @keyframes countIn {
+        0%, 33%     { opacity: 0; }
+        37%, 100%   { opacity: 1; }
       }
 
-      /* Honour a reduced-motion preference with a complete still frame:
-         the query typed, the two matches kept, the selection on the second. */
+      /* Honour a reduced-motion preference with a complete still frame: the query
+         typed, the two matches kept, the other rows dimmed. */
       @media (prefers-reduced-motion: reduce) {
-        #query-group, #typed rect, #cursor, #highlight, .unmatched { animation: none; }
-        #typed rect { width: 171px; }
-        .unmatched  { opacity: .2; }
-        #highlight  { transform: translateY(34px); }
-        #cursor     { opacity: 1; }
+        #typed rect, #query-group, #cursor, #count-before, #count-after, .unmatched { animation: none; }
+        #typed rect   { width: 112px; }
+        #count-before { opacity: 0; }
+        #count-after  { opacity: 1; }
+        .unmatched    { opacity: .18; }
+        #cursor       { opacity: 1; }
       }
     </style>
 
     <clipPath id="typed">
-      <rect x="127" y="26" width="0" height="26" />
+      <rect x="26" y="54" width="0" height="24" />
+    </clipPath>
+
+    <linearGradient id="og" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#1f6feb" />
+      <stop offset="0.55" stop-color="#4c4bd6" />
+      <stop offset="1"   stop-color="#8957e5" />
+    </linearGradient>
+
+    <clipPath id="og-clip">
+      <rect x="26" y="410" width="305" height="160" rx="8" />
     </clipPath>
   </defs>
 
-  <rect x="1" y="1" width="818" height="238" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="2" />
+  <rect x="1" y="1" width="998" height="596" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="2" />
 
+  <!-- Header: what this is, and how much of it is in view -->
   <g class="ui">
-    <text class="prompt" x="28" y="46">/bookmarks</text>
+    <text class="brand" x="26" y="40">Bookmark Atlas</text>
+    <text id="count-before" class="count" x="186" y="40">279 bookmarks · 10 shown</text>
+    <text id="count-after"  class="count" x="186" y="40">279 bookmarks · 2 shown</text>
+  </g>
+
+  <!-- The search box -->
+  <g class="ui">
     <g id="query-group" clip-path="url(#typed)">
-      <text class="query" x="127" y="46">local-first agents</text>
-      <rect id="cursor" class="cursor" x="289" y="30" width="9" height="18" />
+      <text class="query" x="26" y="70">local-first</text>
+      <rect id="cursor" class="cursor" x="127" y="56" width="9" height="18" />
     </g>
   </g>
 
-  <line x1="20" y1="62" x2="800" y2="62" stroke="#21262d" stroke-width="1" />
+  <!-- Source filter chips, then the toggles -->
+  <g class="ui">
+    <rect x="26"  y="88" width="71"  height="22" rx="4" fill="#161b22" />
+    <text class="chip"    x="34"  y="103">All 279</text>
 
-  <rect id="highlight" x="20" y="70" width="780" height="34" rx="6"
+    <rect x="107" y="88" width="94"  height="22" rx="4" fill="#161b22" />
+    <text class="chip"    x="115" y="103">GitHub 179</text>
+
+    <rect x="211" y="88" width="47"  height="22" rx="4" fill="#161b22" />
+    <text class="chip"    x="219" y="103">X 90</text>
+
+    <rect x="268" y="88" width="102" height="22" rx="4" fill="#1f6feb" fill-opacity="0.35" stroke="#58a6ff" stroke-opacity="0.5" />
+    <text class="chip-on" x="276" y="103">Browsers 10</text>
+
+    <text class="toggle" x="390" y="103">hide archived</text>
+    <text class="toggle" x="511" y="103">recent 7d</text>
+    <text class="toggle" x="601" y="103">sort:relevance</text>
+    <text class="toggle" x="730" y="103">? help</text>
+  </g>
+
+  <line x1="1" y1="118" x2="999" y2="118" stroke="#21262d" stroke-width="1" />
+
+  <!-- The list. Browser bookmarks carry no author, so the title column sits where
+       it always does and the gap says there is nobody to name. -->
+  <rect x="14" y="126" width="972" height="30" rx="6"
         fill="#1f6feb" fill-opacity="0.15" stroke="#58a6ff" stroke-opacity="0.5" stroke-width="1" />
 
   <g class="ui">
-    <!-- Row 0 — matches "local-first" -->
-    <text class="idx"   x="44" y="92"  text-anchor="end">1</text>
-    <text class="title" x="62" y="92">mlx — local-first ML on Apple silicon</text>
-    <text class="meta"  x="722" y="92"  text-anchor="end">★ 12.4k</text>
-    <text class="meta"  x="784" y="92"  text-anchor="end">GitHub</text>
+    <text class="idx"   x="30" y="146">▸</text>
+    <text class="idx"   x="62" y="146" text-anchor="end">1</text>
+    <text class="date"  x="76" y="146">2024-06-18</text>
+    <text class="title" x="300" y="146">Local-first software: the seven ideals</text>
 
-    <!-- Row 1 — matches "local-first" -->
-    <text class="idx"   x="44" y="126" text-anchor="end">2</text>
-    <text class="title" x="62" y="126">Local-first software: the seven ideals</text>
-    <text class="meta"  x="722" y="126" text-anchor="end">★ —</text>
-    <text class="meta"  x="784" y="126" text-anchor="end">X</text>
+    <text class="idx"   x="30" y="178"> </text>
+    <text class="idx"   x="62" y="178" text-anchor="end">2</text>
+    <text class="date"  x="76" y="178">2024-03-02</text>
+    <text class="title" x="300" y="178">Local-first, offline-first, and why it matters</text>
 
-    <!-- Row 2 — no match -->
     <g class="unmatched">
-      <text class="idx"   x="44" y="160" text-anchor="end">3</text>
-      <text class="title" x="62" y="160">sqlite-vec: vector search in SQLite</text>
-      <text class="meta"  x="722" y="160" text-anchor="end">★ 3.1k</text>
-      <text class="meta"  x="784" y="160" text-anchor="end">GitHub</text>
+      <text class="idx"   x="62" y="210" text-anchor="end">3</text>
+      <text class="date"  x="76" y="210">2024-05-21</text>
+      <text class="title" x="300" y="210">Notes on CRDT sync engines</text>
     </g>
 
-    <!-- Row 3 — no match -->
     <g class="unmatched">
-      <text class="idx"   x="44" y="194" text-anchor="end">4</text>
-      <text class="title" x="62" y="194">Notes on CRDT sync engines</text>
-      <text class="meta"  x="722" y="194" text-anchor="end">★ —</text>
-      <text class="meta"  x="784" y="194" text-anchor="end">X</text>
+      <text class="idx"   x="62" y="242" text-anchor="end">4</text>
+      <text class="date"  x="76" y="242">2024-01-09</text>
+      <text class="title" x="300" y="242">sqlite-vec: vector search inside SQLite</text>
     </g>
+  </g>
+
+  <line x1="1" y1="260" x2="999" y2="260" stroke="#21262d" stroke-width="1" />
+
+  <!-- The reading pane: what is selected, and the picture the page chose for itself -->
+  <g class="ui">
+    <text class="dtitle"  x="26" y="286">Local-first software: the seven ideals</text>
+    <text class="url"     x="26" y="308">https://www.inkandswitch.com/local-first/</text>
+    <text class="meta"    x="26" y="330">2024-06-18  ·  web_page</text>
+    <text class="meta"    x="26" y="350">ctrl+e to read the full text</text>
+
+    <text class="excerpt" x="26" y="374">Offline-first is a design stance: the app keeps working when the network does not,</text>
+    <text class="excerpt" x="26" y="394">and the network is treated as an optimisation rather than a requirement.</text>
+  </g>
+
+  <g>
+    <rect x="26" y="410" width="305" height="160" rx="8" fill="url(#og)" />
+    <g clip-path="url(#og-clip)">
+      <circle cx="300" cy="440" r="86" fill="#ffffff" fill-opacity="0.07" />
+      <circle cx="70"  cy="560" r="64" fill="#ffffff" fill-opacity="0.05" />
+      <rect x="26" y="410" width="305" height="160" fill="#0d1117" fill-opacity="0.18" />
+    </g>
+    <text class="ui" x="178" y="486" text-anchor="middle"
+          style="font-size:19px; font-weight:600; fill:#ffffff;">Local-first software</text>
+    <text class="ui" x="178" y="510" text-anchor="middle"
+          style="font-size:12px; fill:#ffffff; fill-opacity:0.75;">inkandswitch.com</text>
+    <rect x="26" y="410" width="305" height="160" rx="8" fill="none" stroke="#30363d" stroke-width="1" />
   </g>
 </svg>

@@ -6,16 +6,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.2.0] - 2026-10-05
 
-Bookmark Atlas now reads your browser bookmarks. Chrome, Brave, Edge, Chromium, Vivaldi,
-Arc, Opera, Firefox and Safari are read from the files they already keep on disk — no export,
-no extension, no account. A browser bookmark becomes an ordinary resource next to your stars
-and posts, so the same search, the same recall ranking, and the same palette reach it.
+Bookmark Atlas used to know what you saved. Now it knows what is *in* it.
+
+Your browser bookmarks join your stars and posts as ordinary resources, read from the files
+Chrome, Brave, Edge, Chromium, Vivaldi, Arc, Opera, Firefox and Safari already keep on disk —
+no export, no extension, no account. Each one is then fetched and its text indexed, so search
+reaches what is on the page and not only what it is called. A page that turns this machine away
+is read from the Wayback Machine instead, and every bookmark comes away with the one picture
+that stands for it.
 
 ### Highlights
 
 - **Three readers cover every browser here.** Every Chromium browser writes the same `Bookmarks` file, so one reader handles Chrome, Brave, Edge, Chromium, Vivaldi, Arc, Opera and the Ego Browser at once. Safari and Firefox each needed their own — and Firefox turned out to be the cheapest of the three, because it already keeps its bookmarks in SQLite, which this project already uses.
-- **A browser bookmark is not a second-class row.** It lands in the same three tables as a star or a post: an integration per browser profile, a resource per page, a save per bookmark. The folder, the save date, and the browser and profile it came from ride along in metadata. No new table, no new query path, no schema change.
-- **The same page saved twice is one bookmark.** Canonicalisation strips tracking parameters, so a link bookmarked in Brave and again in Ego resolves to a single resource with two saves. A page that is both a starred repository and a bookmark resolves to one resource too, which is the difference between an atlas and four lists.
+- **A browser bookmark is not a second-class row.** It lands in the same three tables as a star or a post: an integration per browser profile, a resource per page, a save per bookmark. The folder, the save date, and the browser and profile it came from ride along in metadata. No new table, no new query path, no schema change. And the same page saved twice is one bookmark, because canonicalisation strips the tracking parameters that make two links look different.
+- **A bookmark is now worth searching.** `enrich web-pages` fetches each page and indexes its text, so a query matches what a page *says* rather than what it is called. Batches walk the collection once instead of retrying the same failures forever. A page that refuses a plain HTTP client — a 403, a rate limit, a Cloudflare challenge — is read from the Wayback Machine instead: on a real collection that recovered 56 of 265 pages, including one that headless Chromium could not get past.
+- **Every bookmark gets the one picture that stands for it.** A repository contributes the first real image in its README, skipping the badge row; a page contributes its `og:image`; an X post keeps its photos. The palette draws it under the preview, so a bookmark is recognisable before you read a word of it.
 - **Your browser stays the source of truth.** Delete a bookmark and the next sync marks it removed. `prune` is what actually deletes, and it takes `--dry-run`.
 
 ### Added

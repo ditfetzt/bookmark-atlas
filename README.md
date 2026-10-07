@@ -13,10 +13,10 @@
 ## Preview
 
 <p align="center">
-  <img src="assets/palette.svg" alt="The /bookmarks palette narrowing a list as a query is typed" width="100%">
+  <img src="assets/palette.svg" alt="The /bookmarks palette filtered to browser bookmarks, with the selected page's preview image drawn under its text" width="100%">
 </p>
 
-<p align="center"><sub>Typing narrows titles <b>and</b> the full text of everything you saved. <code>ctrl+e</code> reads it, <code>ctrl+l</code> pivots to what relates, <code>enter</code> drops it into your prompt.</sub></p>
+<p align="center"><sub><code>tab</code> filters to one source — here, your browser bookmarks. Typing narrows titles <b>and</b> the full text of everything you saved, and the page's own preview image is drawn under it. <code>ctrl+e</code> reads it, <code>ctrl+l</code> pivots to what relates, <code>enter</code> drops it into your prompt.</sub></p>
 
 ## Three interfaces, one database
 
