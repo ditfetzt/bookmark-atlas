@@ -23,6 +23,7 @@ and posts, so the same search, the same recall ranking, and the same palette rea
 - `sync browsers`, reading the Chromium family, Safari and Firefox, with `--browser` and `--profile` to narrow the run.
 - `browsers`, which lists every source found and reports per-source read errors — the answer to "why is Safari empty?" without a stack trace.
 - A **Browsers** filter in the palette: `tab` now cycles All → GitHub → X → Browsers.
+- **A `ctrl+b` picker for choosing which browsers to import from**, plus `browsers --enable NAME,NAME|all|none` for the shell. The choice is stored in `config.json` beside the database, and switching a browser off hides its bookmarks from search and recall rather than only filtering the list — `tab` narrows what you see, but search and recall rank everything. The saves are marked removed rather than deleted, so switching a browser back on restores them, and `prune` stays the step that actually deletes.
 - `ctrl+r` in the palette now syncs browsers as well, so a bookmark you add in your browser shows up without leaving pi. It runs last, because it is the cheapest step and the only one that can fail per source: a blocked Safari plist reports itself without stopping the rest.
 - Browser bookmarks are indexed as `web_page` resources, so full-text search, `recall` and `related` reach them like anything else.
 - Folders are recorded per save, next to the browser and profile the bookmark came from.
@@ -32,6 +33,10 @@ and posts, so the same search, the same recall ranking, and the same palette rea
 - **Every development dependency is now at its latest release.** TypeScript 5.9 → 7.0, `@types/node` 24 → 26, and the pi packages 0.87 → 1.0.4. The source itself needed no changes: the only thing TypeScript 7 broke was an implicit source root, which is now pinned explicitly, and `@types/node` 26 matches the Node 26 that actually runs this project. The palette needed no port to pi 1.0 — it already guarded on `ctx.mode`, used `ctx.hasUI`, and passed `overlay: true` with a responsive width, which is what the 1.0 extension contract asks for.
 - `sync browsers` is safe to re-run: a second pass updates rather than re-imports, and reports the two counts separately.
 - Only `http` and `https` bookmarks are imported. `javascript:`, `chrome://` and `file://` entries are counted and skipped rather than stored as rows nothing can search or fetch.
+
+### Fixed
+
+- **Search returned resources that were no longer saved.** `searchResources` never filtered on an active save, while `recall` and the palette both did, so a repository you had unstarred — or a page whose browser you had switched off — stayed findable by search indefinitely. Search now excludes them, like everything else.
 - `/bookmarks` now describes itself as searching GitHub stars, X posts, and browser bookmarks. It had said only stars and posts since the browser work landed.
 
 ### Notes

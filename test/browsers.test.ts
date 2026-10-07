@@ -15,6 +15,7 @@ import {
   type PlistValue,
 } from "../src/browsers.ts";
 import { openDatabase, type AtlasDatabase } from "../src/db.ts";
+import { searchResources } from "../src/search.ts";
 
 function workspace(): string {
   return mkdtempSync(join(tmpdir(), "atlas-browsers-"));
@@ -447,6 +448,142 @@ test("a browser bookmark and a starred repository share one resource", () => {
     assert.equal(result.imported, 1);
     const resources = db.prepare("SELECT COUNT(*) AS c FROM resources").get() as { c: number };
     assert.equal(Number(resources.c), 1, "one page is one resource, however it was saved");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Choosing which browsers to import from
+// ---------------------------------------------------------------------------
+
+/** Two browsers with one bookmark each, so a selection has something to hide. */
+function twoBrowsers(dir: string): BrowserSource[] {
+  const write = (name: string, guid: string, title: string, url: string): string => {
+    const file = join(dir, name);
+    writeFileSync(
+      file,
+      JSON.stringify({
+        roots: {
+          bookmark_bar: {
+            type: "folder",
+            name: "Bookmarks bar",
+            children: [{ type: "url", guid, name: title, url }],
+          },
+        },
+      }),
+    );
+    return file;
+  };
+  return [
+    {
+      provider: "chrome",
+      kind: "chromium",
+      profile: "Default",
+      path: write("chrome.json", "c1", "Chrome page", "https://example.com/from-chrome"),
+    },
+    {
+      provider: "brave",
+      kind: "chromium",
+      profile: "Default",
+      path: write("brave.json", "b1", "Brave page", "https://example.com/from-brave"),
+    },
+  ];
+}
+
+test("only the enabled browsers are imported, and the rest are hidden", () => {
+  const dir = workspace();
+  const db = openDatabase(":memory:");
+  try {
+    const sources = twoBrowsers(dir);
+    assert.equal(syncBrowserBookmarks(db, { sources, enabled: null }).imported, 2);
+    assert.equal(searchResources(db, "from-brave", 10).length, 1);
+
+    const narrowed = syncBrowserBookmarks(db, { sources, enabled: ["chrome"] });
+    assert.equal(narrowed.imported, 0);
+    assert.equal(narrowed.updated, 1, "chrome still syncs");
+    assert.equal(narrowed.removed, 1, "brave is switched off");
+    assert.deepEqual(narrowed.excluded, [{ provider: "brave", removed: 1 }]);
+    assert.equal(activeSaves(db), 1);
+
+    // The point of the whole feature: a browser switched off leaves search.
+    assert.equal(searchResources(db, "from-brave", 10).length, 0);
+    assert.equal(searchResources(db, "from-chrome", 10).length, 1);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("switching a browser back on brings its bookmarks back", () => {
+  const dir = workspace();
+  const db = openDatabase(":memory:");
+  try {
+    const sources = twoBrowsers(dir);
+    syncBrowserBookmarks(db, { sources, enabled: null });
+    syncBrowserBookmarks(db, { sources, enabled: ["chrome"] });
+    assert.equal(activeSaves(db), 1);
+
+    syncBrowserBookmarks(db, { sources, enabled: null });
+    assert.equal(activeSaves(db), 2, "the rows were hidden, never deleted");
+    assert.equal(searchResources(db, "from-brave", 10).length, 1);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("switching every browser off hides everything without deleting it", () => {
+  const dir = workspace();
+  const db = openDatabase(":memory:");
+  try {
+    const sources = twoBrowsers(dir);
+    syncBrowserBookmarks(db, { sources, enabled: null });
+
+    const none = syncBrowserBookmarks(db, { sources, enabled: [] });
+    assert.equal(none.removed, 2);
+    assert.equal(activeSaves(db), 0);
+    assert.equal(searchResources(db, "from-chrome", 10).length, 0);
+
+    // An empty selection is not the same as the default: it is a real choice.
+    const total = db.prepare("SELECT COUNT(*) AS c FROM saves").get() as { c: number };
+    assert.equal(Number(total.c), 2, "prune is what deletes, and it stays a separate step");
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a run scoped to one browser says nothing about the others", () => {
+  const dir = workspace();
+  const db = openDatabase(":memory:");
+  try {
+    const sources = twoBrowsers(dir);
+    syncBrowserBookmarks(db, { sources, enabled: null });
+
+    // --browser chrome is a question about chrome, not a statement that brave
+    // should be switched off, so nothing may be hidden by it.
+    const scoped = syncBrowserBookmarks(db, { sources, enabled: ["chrome"], provider: "chrome" });
+    assert.equal(scoped.removed, 0);
+    assert.deepEqual(scoped.excluded, []);
+    assert.equal(activeSaves(db), 2);
+  } finally {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the default selection hides nothing", () => {
+  const dir = workspace();
+  const db = openDatabase(":memory:");
+  try {
+    const sources = twoBrowsers(dir);
+    syncBrowserBookmarks(db, { sources, enabled: null });
+    const again = syncBrowserBookmarks(db, { sources, enabled: null });
+    assert.equal(again.removed, 0);
+    assert.deepEqual(again.excluded, []);
+    assert.equal(activeSaves(db), 2);
   } finally {
     db.close();
     rmSync(dir, { recursive: true, force: true });

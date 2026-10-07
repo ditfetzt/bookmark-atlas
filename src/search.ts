@@ -139,6 +139,11 @@ export function searchResources(
     LEFT JOIN github_repositories g ON g.resource_id = r.id
     LEFT JOIN resource_notes n ON n.resource_id = r.id
     WHERE resources_fts MATCH ?
+      -- A resource with no active save is one whose star, post, or browser
+      -- bookmark went away. recall and the palette already exclude those; this
+      -- query was the one that did not, so unstarring a repository left it
+      -- findable by search.
+      AND EXISTS (SELECT 1 FROM saves s WHERE s.resource_id = r.id AND s.unsaved_at IS NULL)
     ORDER BY score ASC, savedAt DESC
     LIMIT ?
   `).all(ftsQuery, limit) as Array<{

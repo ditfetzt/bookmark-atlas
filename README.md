@@ -71,6 +71,7 @@ GitHub credentials resolve in this order: `BOOKMARK_ATLAS_GITHUB_TOKEN`, then `G
 | `sync github [--limit N]` | Incremental GitHub star sync (metadata only) |
 | `sync browsers [--browser NAME] [--profile NAME] [--limit N]` | Import browser bookmarks from every browser found |
 | `browsers` | List the browser bookmark sources found, and whether each is readable |
+| `browsers --enable NAME,NAME \| all \| none` | Choose which browsers to import from |
 | `enrich github-readmes` | Fetch README text; incremental and ETag-aware |
 | `enrich x-posts` | Repair X titles and authors from the stored payload |
 | `import x-json <file>` | Import a Siftly or TweetXVault export |
@@ -110,6 +111,18 @@ Re-running is safe: a second pass updates instead of re-importing. Delete a book
 
 **Safari needs Full Disk Access.** macOS protects `~/Library/Safari`, so grant your terminal access in System Settings → Privacy & Security → Full Disk Access. Without it, `sync browsers` reports the error for Safari and leaves those bookmarks untouched, rather than reading a blocked file as an empty one.
 
+### Choosing which browsers to import
+
+Every browser found is imported by default. To narrow that, press **`ctrl+b`** in the palette and switch browsers on or off, or set it from the shell:
+
+```bash
+bookmark-atlas browsers --enable brave,safari
+bookmark-atlas browsers --enable all      # the default
+bookmark-atlas browsers --enable none     # import nothing
+```
+
+The choice lives in `config.json` beside the database. Switching a browser off **hides its bookmarks from search and recall**, because `tab` only filters what you see while search and recall rank everything. The saves are marked removed rather than deleted, so switching the browser back on restores them — `prune` is what actually deletes. A browser that is off is also not synced.
+
 **Only `http` and `https` are imported.** `javascript:`, `chrome://`, and `file://` entries are counted and skipped — they cannot be fetched, and they are not pages.
 
 ## Recall — bookmarks as context for the agent
@@ -144,7 +157,7 @@ bookmark-atlas note 406 "Closest blueprint: hybrid BM25+vector with RRF"
 /bookmarks local-first agents
 ```
 
-`↑↓` navigate · `Fn+←/→` first/last · `Fn+↑/↓` ten rows · `tab` source filter · `ctrl+a` hide archived · `ctrl+d` last 7 days · `ctrl+t` topic picker · `ctrl+l` pivot to related · `ctrl+s` cycle sort · `ctrl+r` fetch new bookmarks · `ctrl+e` read full text · `ctrl+n` write a note · `ctrl+x` mark for multi-insert · `enter` insert · `ctrl+y` copy URL · `ctrl+o` open in browser · `?` help · `esc` close
+`↑↓` navigate · `Fn+←/→` first/last · `Fn+↑/↓` ten rows · `tab` source filter · `ctrl+a` hide archived · `ctrl+d` last 7 days · `ctrl+t` topic picker · `ctrl+b` choose browsers · `ctrl+l` pivot to related · `ctrl+s` cycle sort · `ctrl+r` fetch new bookmarks · `ctrl+e` read full text · `ctrl+n` write a note · `ctrl+x` mark for multi-insert · `enter` insert · `ctrl+y` copy URL · `ctrl+o` open in browser · `?` help · `esc` close
 
 Rows are numbered by position in the current view, so the number stays stable while you scroll, filter, or sort. `enter` inserts the bookmark — or every marked one, separated by `---` — into the editor, note included. The extension registers exactly two commands, `/bookmarks` and `/consult [focus]`, and opens its database connection read-only.
 
@@ -204,7 +217,7 @@ By default the database sits in your per-user data directory, never in the check
 | Variable | Purpose |
 | --- | --- |
 | `BOOKMARK_ATLAS_DB` | Full SQLite path (overrides the data directory) |
-| `BOOKMARK_ATLAS_DATA_DIR` | Data directory (default above) |
+| `BOOKMARK_ATLAS_DATA_DIR` | Data directory (default above), also holds `config.json` |
 | `BOOKMARK_ATLAS_GITHUB_TOKEN` | GitHub token (falls back to `GH_TOKEN` or `gh auth token`) |
 | `BOOKMARK_ATLAS_TWEETXVAULT_BIN` | TweetXVault executable (default `tweetxvault`) |
 | `BOOKMARK_ATLAS_TWEETXVAULT_DIR` | TweetXVault data dir, used to resolve media paths |

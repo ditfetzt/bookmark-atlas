@@ -23,6 +23,10 @@ type Harness = {
   preview: { id: number; offset: number } | null;
   topic: string | null;
   topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null;
+  browserPicker: {
+    entries: Array<{ provider: string; count: number; enabled: boolean }>;
+    index: number;
+  } | null;
   sortMode: string;
   filtered: Array<{ id: number; title: string }>;
   items: Array<{ id: number; title: string }>;
@@ -93,6 +97,8 @@ const CTRL_T = "\x14";
 const CTRL_S = "\x13";
 const CTRL_L = "\x0c";
 const CTRL_X = "\x18";
+const CTRL_B = "\x02";
+const DOWN = "\x1b[B";
 const F1 = "\x1bOP";
 const ESCAPE = "\x1b";
 
@@ -361,6 +367,80 @@ test("the tab filter cycles through GitHub, X and browser bookmarks", () => {
   assert.deepEqual(titles(), ["page"], "browser bookmarks get their own filter");
   list.handleInput(TAB);
   assert.equal(list.filtered.length, 3, "and it wraps back to All");
+});
+
+test("ctrl+b folds browser profiles into one row each and saves the choice", async () => {
+  // The picker is opened with `void`, so a test waits a macrotask for the CLI
+  // round trip that fills it.
+  const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const { calls, run } = fakeRunner((args) => {
+    if (args[0] === "browsers" && args[1] !== "--enable") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          sources: [
+            { provider: "brave", profile: "Default", bookmarks: 284, enabled: true },
+            { provider: "ego", profile: "Default", bookmarks: 256, enabled: true },
+            { provider: "ego", profile: "Profile 1", bookmarks: 261, enabled: true },
+          ],
+        }),
+      };
+    }
+    if (args[0] === "sync") return { ok: true, stdout: JSON.stringify({ removed: 517 }) };
+    return { ok: true, stdout: "{}" };
+  });
+  const list = palette(3, { cliRunner: run });
+
+  list.handleInput(CTRL_B);
+  await flush();
+
+  // Two ego profiles are one browser, showing the total it would contribute.
+  assert.deepEqual(
+    list.browserPicker?.entries.map((entry) => [entry.provider, entry.count, entry.enabled]),
+    [
+      ["brave", 284, true],
+      ["ego", 517, true],
+    ],
+  );
+
+  list.handleInput(DOWN);
+  list.handleInput(" ");
+  assert.equal(list.browserPicker?.entries[1]?.enabled, false, "space toggles the row");
+
+  list.handleInput("\r");
+  await flush();
+  await flush();
+
+  // Saving writes the selection through the CLI and then syncs, because the
+  // choice only takes effect once a sync has run.
+  assert.deepEqual(calls, ["browsers", "browsers --enable brave", "sync browsers"]);
+  assert.equal(list.browserPicker, null);
+  assert.match(list.notice ?? "", /517 bookmarks hidden/);
+});
+
+test("esc leaves the browser selection alone", async () => {
+  const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+  const { calls, run } = fakeRunner((args) => {
+    if (args[0] === "browsers") {
+      return {
+        ok: true,
+        stdout: JSON.stringify({
+          sources: [{ provider: "brave", profile: "Default", bookmarks: 284, enabled: true }],
+        }),
+      };
+    }
+    return { ok: true, stdout: "{}" };
+  });
+  const list = palette(3, { cliRunner: run });
+
+  list.handleInput(CTRL_B);
+  await flush();
+  list.handleInput(" ");
+  list.handleInput("\x1b");
+  await flush();
+
+  assert.equal(list.browserPicker, null);
+  assert.deepEqual(calls, ["browsers"], "nothing is written on cancel");
 });
 
 test("a type the palette does not know is not counted as a browser bookmark", () => {

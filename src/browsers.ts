@@ -4,6 +4,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { refreshResourceFts, type AtlasDatabase } from "./db.ts";
+import { readConfig } from "./config.ts";
 
 export type BrowserKind = "chromium" | "safari" | "firefox";
 
@@ -38,6 +39,10 @@ export type BrowserSyncOptions = {
   // Lets a caller (and the tests) supply the sources instead of scanning the
   // machine, so a fixture can be synced without a browser installed.
   sources?: BrowserSource[];
+  // Overrides config.json. Only consulted when the sources are discovered, so
+  // an explicit source list is taken as given rather than narrowed again.
+  // `null` means every browser; an empty array means none.
+  enabled?: string[] | null;
 };
 
 export type BrowserSourceResult = {
@@ -58,6 +63,11 @@ export type BrowserSyncResult = {
   updated: number;
   removed: number;
   skipped: number;
+  /**
+   * Browsers turned off in config.json. Their bookmarks are hidden by marking
+   * the saves removed, which is what takes them out of search and recall.
+   */
+  excluded: Array<{ provider: string; removed: number }>;
 };
 
 // Every Chromium browser writes the same `Bookmarks` JSON, so one reader covers
@@ -91,6 +101,16 @@ const CHROMIUM_ROOTS: Record<string, Record<string, string>> = {
     opera: "Opera Software/Opera Stable",
   },
 };
+
+// Every browser provider this software can have written, on any platform. Not
+// just the ones installed here: a browser that has since been uninstalled still
+// has an integration and saves in the database, and those are exactly the rows an
+// exclusion needs to find.
+export const BROWSER_PROVIDERS: ReadonlySet<string> = new Set([
+  ...Object.values(CHROMIUM_ROOTS).flatMap((roots) => Object.keys(roots)),
+  "safari",
+  "firefox",
+]);
 
 // Safari names its own top-level folders after internal identifiers. Anything
 // not listed here is kept verbatim; `History` is dropped because it is not a
@@ -594,14 +614,44 @@ export function readBrowserSource(source: BrowserSource): BrowserBookmark[] {
 
 export function syncBrowserBookmarks(db: AtlasDatabase, options: BrowserSyncOptions = {}): BrowserSyncResult {
   const all = options.sources ?? discoverBrowserSources();
+  // An explicit source list is taken as given. Otherwise config.json narrows
+  // discovery — and narrowing is all it can do, never widening. `null` means
+  // every browser; an empty array means none.
+  const enabled: string[] | null = options.enabled ?? (options.sources ? null : readConfig().browsers);
   const selected = all.filter(
     (source) =>
+      (enabled === null || enabled.includes(source.provider)) &&
       (!options.provider || source.provider === options.provider) &&
       (!options.profile || source.profile === options.profile),
   );
 
-  const result: BrowserSyncResult = { sources: [], imported: 0, updated: 0, removed: 0, skipped: 0 };
+  const result: BrowserSyncResult = {
+    sources: [],
+    imported: 0,
+    updated: 0,
+    removed: 0,
+    skipped: 0,
+    excluded: [],
+  };
   const now = new Date().toISOString();
+
+  // A full run is a statement about every browser, so one switched off in
+  // config.json has its bookmarks hidden here — which is what takes them out of
+  // search, recall and the palette. A scoped run says nothing about the others
+  // and must leave them alone.
+  const fullRun = enabled !== null && !options.provider && !options.profile;
+  if (fullRun) {
+    const markRemoved = db.prepare(
+      "UPDATE saves SET unsaved_at = ?, updated_at = ? WHERE unsaved_at IS NULL AND integration_id = ?",
+    );
+    for (const row of db.prepare("SELECT id, provider FROM integrations").all()) {
+      const provider = String(row.provider);
+      if (!BROWSER_PROVIDERS.has(provider) || enabled.includes(provider)) continue;
+      const changes = Number(markRemoved.run(now, now, Number(row.id)).changes);
+      result.excluded.push({ provider, removed: changes });
+      result.removed += changes;
+    }
+  }
 
   for (const source of selected) {
     const summary: BrowserSourceResult = {

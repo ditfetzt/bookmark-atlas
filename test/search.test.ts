@@ -25,6 +25,19 @@ test("finds indexed repository metadata without network or LLM", () => {
   db.close();
 });
 
+test("a resource with no active save leaves search", () => {
+  const db = openDatabase(":memory:");
+  seed(db);
+  assert.equal(searchResources(db, "local first agent", 5).length, 1);
+
+  // Unstarring a repository, or switching off the browser that saved a page,
+  // marks its save removed. recall and the palette already excluded those; this
+  // is the query that did not, so a resource stayed findable after it was gone.
+  db.prepare("UPDATE saves SET unsaved_at = ? WHERE resource_id = 1").run("2026-01-02T00:00:00Z");
+  assert.equal(searchResources(db, "local first agent", 5).length, 0);
+  db.close();
+});
+
 test("stems word variants so designing matches design", () => {
   const db = openDatabase(":memory:");
   seed(db);
@@ -95,6 +108,9 @@ test("reads the article body rather than the bare link that shares its bookmark"
 
 function seed(db: DatabaseSync): void {
   db.exec(`
+    INSERT INTO integrations (id, provider, account, status, created_at, updated_at)
+    VALUES (1, 'github', 'test', 'active', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+
     INSERT INTO resources (
       id, canonical_url, resource_type, title, author, description,
       language, created_at, updated_at
@@ -104,6 +120,16 @@ function seed(db: DatabaseSync): void {
       'A local first coding agent with searchable memory',
       'TypeScript', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
     );
+
+    -- Every synced resource has a save, and search only returns resources that
+    -- still have an active one. A fixture without this row is not a shape the
+    -- rest of the system ever produces.
+    INSERT INTO saves (
+      integration_id, provider_external_id, resource_id, saved_at, created_at, updated_at
+    ) VALUES (
+      1, 'R_1', 1, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z'
+    );
+
     INSERT INTO resources_fts (resource_id, title, description, topics, language)
     VALUES (
       1, 'example/local-agent',

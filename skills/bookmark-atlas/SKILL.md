@@ -114,7 +114,9 @@ bookmark, `Fn+↑`/`Fn+↓` (Page Up/Down) jump ten rows, `Cmd+↑`/`Cmd+↓` do
 same where the terminal forwards Cmd, `tab` cycle the source filter
 (All → GitHub → X → Browsers), `ctrl+a` hide archived, `ctrl+d` only the last 7 days,
 `ctrl+t` filter by topic (a picker ranked by how many bookmarks carry each
-topic), `ctrl+l` pivot the list to what is related to the selected bookmark and
+topic), `ctrl+b` choose which browsers to import from (space toggles, enter
+saves and re-syncs; switching a browser off hides its bookmarks from search
+and recall), `ctrl+l` pivot the list to what is related to the selected bookmark and
 back, `ctrl+s` cycle sort (newest → oldest → stars → A–Z, plus best match once
 a query is typed; sorting by stars swaps the date column for the star count and
 puts unstarred X posts last), `ctrl+r` fetch new bookmarks (runs `sync github`,
@@ -137,6 +139,8 @@ the prompt automatically; the user decides when to consult.
 "$ATLAS_CLI" sync github              # latest stars
 "$ATLAS_CLI" enrich github-readmes    # READMEs (incremental)
 "$ATLAS_CLI" sync browsers            # bookmarks from Chrome, Safari, Firefox
+"$ATLAS_CLI" browsers                 # what was found, and which are switched on
+"$ATLAS_CLI" browsers --enable brave   # import only brave (all | none | a,b)
 "$ATLAS_CLI" collect x                # X + all media (TweetXVault)
 "$ATLAS_CLI" collect x --fast         # text only, no media
 ```

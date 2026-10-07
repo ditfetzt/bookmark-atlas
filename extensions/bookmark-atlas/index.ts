@@ -10,6 +10,7 @@
  *   ctrl+y   copy the url
  *   ctrl+o   open the url in the default browser
  *   ctrl+r   fetch new bookmarks (GitHub stars, X posts, READMEs, browsers)
+ *   ctrl+b   choose which browsers to import from
  *   ctrl+e   read the full text
  *   ctrl+n   write a note about the selected bookmark
  *   ctrl+t   filter by topic; ctrl+a hide archived; ctrl+d only the last 7 days
@@ -143,6 +144,38 @@ function sourceOf(bookmark: Bookmark): "github" | "x" | "browsers" {
 	// one of the hundreds of browser rows.
 	if (bookmark.type === "web_page") return "browsers";
 	return "github";
+}
+
+/**
+ * `bookmark-atlas browsers` reports one entry per browser profile, but the
+ * selection is per browser, so this folds the profiles into one row each. A
+ * provider with several profiles shows the total it would contribute.
+ */
+function parseBrowserList(stdout: string): Array<{ provider: string; count: number; enabled: boolean }> {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(stdout);
+	} catch {
+		return [];
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return [];
+	const sources = (parsed as { sources?: unknown }).sources;
+	if (!Array.isArray(sources)) return [];
+
+	const byProvider = new Map<string, { provider: string; count: number; enabled: boolean }>();
+	for (const entry of sources) {
+		if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+		const { provider, bookmarks, enabled } = entry as {
+			provider?: unknown;
+			bookmarks?: unknown;
+			enabled?: unknown;
+		};
+		if (typeof provider !== "string") continue;
+		const row = byProvider.get(provider) ?? { provider, count: 0, enabled: enabled === true };
+		row.count += typeof bookmarks === "number" ? bookmarks : 0;
+		byProvider.set(provider, row);
+	}
+	return [...byProvider.values()].sort((a, b) => a.provider.localeCompare(b.provider));
 }
 
 /**
@@ -378,6 +411,12 @@ export class BookmarkPalette implements Component, Focusable {
 	private recentOnly = false;
 	private topic: string | null = null;
 	private topicPicker: { entries: Array<{ name: string; count: number }>; index: number } | null = null;
+	/** Which browsers to import from. `count` is across every profile of that browser. */
+	private browserPicker: {
+		entries: Array<{ provider: string; count: number; enabled: boolean }>;
+		index: number;
+		saving: boolean;
+	} | null = null;
 	private reading = false;
 	/** Bookmarks marked for a combined insert. */
 	private marked = new Set<number>();
@@ -745,6 +784,108 @@ export class BookmarkPalette implements Component, Focusable {
 		this.requestRender?.();
 	}
 
+	/**
+	 * The browser list comes from the CLI rather than being discovered here, so
+	 * the config file has exactly one reader and one writer.
+	 */
+	private async openBrowserPicker(): Promise<void> {
+		if (this.browserPicker) return;
+		if (!existsSync(CLI_PATH)) {
+			this.notice = "browser selection unavailable: CLI not found";
+			this.requestRender?.();
+			return;
+		}
+		this.notice = "↻ reading browsers…";
+		this.requestRender?.();
+		const result = await this.cliRunner(["browsers"]);
+		if (!result.ok) {
+			this.notice = "⚠ could not read browsers";
+			this.requestRender?.();
+			return;
+		}
+		const entries = parseBrowserList(result.stdout);
+		if (entries.length === 0) {
+			this.notice = "no browsers found";
+			this.requestRender?.();
+			return;
+		}
+		this.browserPicker = { entries, index: 0, saving: false };
+		this.notice = null;
+		this.requestRender?.();
+	}
+
+	private handleBrowserPickerInput(data: string): void {
+		const picker = this.browserPicker;
+		if (!picker || picker.saving) return;
+		const page = LIST_ROWS - 1;
+		const last = Math.max(0, picker.entries.length - 1);
+		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+b") || matchesKey(data, "ctrl+c")) {
+			this.browserPicker = null;
+		} else if (matchesKey(data, "up")) {
+			picker.index = Math.max(0, picker.index - 1);
+		} else if (matchesKey(data, "down")) {
+			picker.index = Math.min(last, picker.index + 1);
+		} else if (matchesKey(data, "pageUp")) {
+			picker.index = Math.max(0, picker.index - page);
+		} else if (matchesKey(data, "pageDown")) {
+			picker.index = Math.min(last, picker.index + page);
+		} else if (matchesKey(data, "home")) {
+			picker.index = 0;
+		} else if (matchesKey(data, "end")) {
+			picker.index = last;
+		} else if (matchesKey(data, "space")) {
+			const entry = picker.entries[picker.index];
+			if (entry) entry.enabled = !entry.enabled;
+		} else if (matchesKey(data, "return")) {
+			void this.saveBrowserPicker();
+			return;
+		} else {
+			return;
+		}
+		this.requestRender?.();
+	}
+
+	private async saveBrowserPicker(): Promise<void> {
+		const picker = this.browserPicker;
+		if (!picker) return;
+		picker.saving = true;
+		this.notice = "↻ applying browser selection…";
+		this.requestRender?.();
+
+		const on = picker.entries.filter((entry) => entry.enabled).map((entry) => entry.provider);
+		// Everything on is the default, so it is stored as the absence of a choice
+		// rather than a list that would go stale as browsers are installed.
+		let request = on.join(",");
+		if (on.length === picker.entries.length) request = "all";
+		else if (on.length === 0) request = "none";
+		const saved = await this.cliRunner(["browsers", "--enable", request]);
+		if (!saved.ok) {
+			picker.saving = false;
+			this.notice = "⚠ could not save the browser selection";
+			this.requestRender?.();
+			return;
+		}
+
+		// The choice only changes what is in the database once a sync runs, and the
+		// sync is what hides the bookmarks of a browser switched off here.
+		const synced = await this.cliRunner(["sync", "browsers"]);
+		this.browserPicker = null;
+		contentCache = null;
+		this.items = loadBookmarks();
+		this.details.clear();
+		this.images.clear();
+		this.filtered = this.applyFilter(this.input.getValue());
+		this.selected = Math.min(this.selected, Math.max(0, this.filtered.length - 1));
+		const hidden = synced.ok ? countFrom(synced.stdout, "removed") : null;
+		let notice = "✓ browsers updated";
+		if (!synced.ok) notice = "⚠ selection saved, but the sync failed";
+		else if (hidden !== null && hidden > 0) {
+			notice = `✓ browsers updated · ${hidden} bookmark${hidden === 1 ? "" : "s"} hidden`;
+		}
+		this.notice = notice;
+		this.requestRender?.();
+	}
+
 	/** Keys while writing a note: enter saves it, esc cancels, anything else edits. */
 	private handleNoteInput(data: string): void {
 		const edit = this.noteEdit;
@@ -822,6 +963,10 @@ export class BookmarkPalette implements Component, Focusable {
 			this.handleTopicPickerInput(data);
 			return;
 		}
+		if (this.browserPicker) {
+			this.handleBrowserPickerInput(data);
+			return;
+		}
 		if (this.reading) {
 			this.handleReadingInput(data);
 			return;
@@ -878,6 +1023,10 @@ export class BookmarkPalette implements Component, Focusable {
 		}
 		if (matchesKey(data, "ctrl+t")) {
 			this.openTopicPicker();
+			return;
+		}
+		if (matchesKey(data, "ctrl+b")) {
+			void this.openBrowserPicker();
 			return;
 		}
 		if (matchesKey(data, "ctrl+l")) {
@@ -992,6 +1141,55 @@ export class BookmarkPalette implements Component, Focusable {
 		return lines;
 	}
 
+	/** Which browsers to import from. `space` toggles, `enter` saves. */
+	private renderBrowsers(width: number): string[] {
+		const theme = this.theme;
+		const innerWidth = Math.max(20, width - 4);
+		const pad = (text: string): string => {
+			const line = truncateToWidth(text, innerWidth, "…", true);
+			return line + " ".repeat(Math.max(0, innerWidth - visibleWidth(line)));
+		};
+		const row = (content: string): string =>
+			theme.fg("border", "│ ") + pad(content) + theme.fg("border", " │");
+		const picker = this.browserPicker;
+		const entries = picker?.entries ?? [];
+		const selected = picker?.index ?? 0;
+		const rows = 20;
+		const maxStart = Math.max(0, entries.length - rows);
+		const start = Math.max(0, Math.min(selected - Math.floor(rows / 2), maxStart));
+		const on = entries.filter((entry) => entry.enabled).length;
+
+		const lines: string[] = [theme.fg("border", `┌${"─".repeat(width - 2)}┐`)];
+		lines.push(
+			row(
+				theme.fg("accent", theme.bold("Import bookmarks from")) +
+					theme.fg("dim", `  ${on} of ${entries.length} on`),
+			),
+		);
+		lines.push(theme.fg("border", `├${"─".repeat(width - 2)}┤`));
+		for (let offset = 0; offset < rows; offset += 1) {
+			const index = start + offset;
+			const entry = entries[index];
+			if (!entry) {
+				lines.push(row(""));
+				continue;
+			}
+			const box = entry.enabled ? "[x]" : "[ ]";
+			const text = `${index === selected ? "▸" : " "} ${box} ${entry.provider.padEnd(20)}${String(entry.count).padStart(5)}`;
+			lines.push(
+				row(
+					index === selected ? theme.bg("selectedBg", theme.fg("text", text)) : theme.fg("muted", text),
+				),
+			);
+		}
+		lines.push(theme.fg("border", `└${"─".repeat(width - 2)}┘`));
+		lines.push(theme.fg("dim", "  ↑↓ navigate · space toggle · enter save · esc cancel"));
+		lines.push(
+			theme.fg("dim", "  switching a browser off hides its bookmarks from search and recall"),
+		);
+		return lines;
+	}
+
 	/** The `?` / F1 screen: what this is, and every key. */
 	private renderHelp(width: number): string[] {
 		const theme = this.theme;
@@ -1007,7 +1205,7 @@ export class BookmarkPalette implements Component, Focusable {
 
 		const body = [
 			theme.fg("accent", theme.bold("Bookmark Atlas")),
-			theme.fg("dim", "  Starred GitHub repos and saved X posts, read from a local database."),
+			theme.fg("dim", "  GitHub stars, X posts and browser bookmarks, read from a local database."),
 			"",
 			theme.fg("dim", "  Type to search titles and captured text, arrows to move, enter to insert."),
 			"",
@@ -1022,6 +1220,7 @@ export class BookmarkPalette implements Component, Focusable {
 			key("ctrl+a", "hide archived repositories"),
 			key("ctrl+d", "only what was added in the last 7 days"),
 			key("ctrl+t", "filter by topic"),
+			key("ctrl+b", "choose which browsers to import from"),
 			key("ctrl+l", "pivot the list to what is related to this bookmark"),
 			key("ctrl+x", "mark this bookmark, so enter inserts several at once"),
 			key("ctrl+s", "sort: newest, oldest, stars, A-Z (best match appears once you search)"),
@@ -1048,6 +1247,7 @@ export class BookmarkPalette implements Component, Focusable {
 	render(width: number): string[] {
 		if (this.showHelp) return this.renderHelp(width);
 		if (this.topicPicker) return this.renderTopics(width);
+		if (this.browserPicker) return this.renderBrowsers(width);
 		this.input.focused = this.focused;
 		if (this.noteEdit) this.noteEdit.input.focused = this.focused;
 		const theme = this.theme;

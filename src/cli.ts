@@ -7,7 +7,8 @@ import { collectStage } from "./stage.ts";
 import { enrichGitHubReadmes } from "./enrich.ts";
 import { importXJsonFile, repairXPosts } from "./x.ts";
 import { collectXBookmarks } from "./collector.ts";
-import { discoverBrowserSources, readBrowserSource, syncBrowserBookmarks } from "./browsers.ts";
+import { BROWSER_PROVIDERS, discoverBrowserSources, readBrowserSource, syncBrowserBookmarks } from "./browsers.ts";
+import { atlasConfigPath, readConfig, writeConfig } from "./config.ts";
 import { startXCaptureServer } from "./receiver.ts";
 import { startMcpServer } from "./mcp.ts";
 
@@ -26,6 +27,7 @@ const VALUE_FLAGS = new Set([
   "--port",
   "--browser",
   "--profile",
+  "--enable",
 ]);
 
 function positional(args: string[]): string[] {
@@ -49,6 +51,7 @@ Usage:
   bookmark-atlas sync github [--limit N] [--account NAME]
   bookmark-atlas sync browsers [--browser NAME] [--profile NAME] [--limit N]
   bookmark-atlas browsers
+  bookmark-atlas browsers --enable NAME,NAME | --enable all | --enable none
   bookmark-atlas enrich github-readmes [--limit N] [--concurrency N]
   bookmark-atlas enrich x-posts
   bookmark-atlas import x-json <file> [--account NAME] [--reconcile]
@@ -148,6 +151,31 @@ async function main(): Promise<void> {
     }
 
     if (command === "browsers") {
+      const enabled = readConfig().browsers;
+      const isEnabled = (provider: string): boolean => enabled === null || enabled.includes(provider);
+      const known = [...BROWSER_PROVIDERS].sort((a, b) => a.localeCompare(b));
+
+      // --enable is the only writer of the browser selection, so the palette
+      // shells out to it rather than reimplementing the config file format.
+      const request = optionValue(args, "--enable");
+      if (request !== undefined) {
+        const requested = request.trim().toLowerCase();
+        let next: string[] | null;
+        if (requested === "all" || requested === "") next = null;
+        else if (requested === "none") next = [];
+        else next = [...new Set(requested.split(",").map((name) => name.trim()).filter(Boolean))];
+        const unknown = (next ?? []).filter((name) => !BROWSER_PROVIDERS.has(name));
+        if (unknown.length > 0) {
+          throw new Error(
+            `unknown browser${unknown.length > 1 ? "s" : ""}: ${unknown.join(", ")}. ` +
+              `Known browsers: ${known.join(", ")}`,
+          );
+        }
+        writeConfig({ browsers: next });
+        console.log(JSON.stringify({ config: atlasConfigPath(), browsers: next ?? "all" }, null, 2));
+        return;
+      }
+
       // The diagnostic for "why is Safari empty?": it reports the permission
       // error per source instead of failing the whole run.
       const sources = discoverBrowserSources().map((source) => {
@@ -157,6 +185,7 @@ async function main(): Promise<void> {
             profile: source.profile,
             kind: source.kind,
             path: source.path,
+            enabled: isEnabled(source.provider),
             bookmarks: readBrowserSource(source).length,
           };
         } catch (error) {
@@ -165,11 +194,24 @@ async function main(): Promise<void> {
             profile: source.profile,
             kind: source.kind,
             path: source.path,
+            enabled: isEnabled(source.provider),
             error: error instanceof Error ? error.message : String(error),
           };
         }
       });
-      console.log(JSON.stringify({ found: sources.length, sources }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            config: atlasConfigPath(),
+            enabled: enabled ?? "all",
+            known,
+            found: sources.length,
+            sources,
+          },
+          null,
+          2,
+        ),
+      );
       return;
     }
 
