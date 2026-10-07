@@ -1140,9 +1140,17 @@ export class BookmarkPalette implements Component, Focusable {
 			return;
 		}
 
+		// Everything that reaches the search box. Keys that only move the caret —
+		// left/right, shift+arrows, home/end inside the query — change nothing, and
+		// must not be mistaken for a new query: re-filtering would send the cursor
+		// back to the first result while the list stayed exactly the same.
+		const before = this.input.getValue();
 		this.input.handleInput(data);
-		this.filtered = this.applyFilter(this.input.getValue());
-		this.selected = 0;
+		const after = this.input.getValue();
+		if (after !== before) {
+			this.filtered = this.applyFilter(after);
+			this.selected = 0;
+		}
 	}
 
 	/** The topic picker: topics ranked by how many bookmarks carry them. */

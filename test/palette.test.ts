@@ -287,6 +287,25 @@ test("enter still inserts from the reading pane", () => {
   assert.deepEqual(list.actions, [{ action: "insert", ids: [1] }]);
 });
 
+test("keys that only move the caret do not send the cursor back to the first row", () => {
+  const list = palette(50);
+  list.handleInput(DOWN);
+  list.handleInput(DOWN);
+  assert.equal(list.selected, 2);
+
+  // shift+arrows and left/right reach the search box without changing the query,
+  // so the list is identical and the cursor must stay where it was put.
+  const caretKeys = ["\x1b[1;2A", "\x1b[1;2B", "\x1b[D", "\x1b[C", "\x1b[1;2D", "\x1b[1;2C"];
+  for (const key of caretKeys) {
+    list.handleInput(key);
+    assert.equal(list.selected, 2, `the cursor survives ${JSON.stringify(key)}`);
+  }
+
+  // A real query change is a new list, so it does start from the top.
+  list.handleInput("B");
+  assert.equal(list.selected, 0);
+});
+
 test("the preview image survives ctrl+e and the overlay keeps one height", () => {
   // The reading pane trades the list and its separator for text. It must not
   // trade the image too: an image whose rows are not reserved is drawn over the
