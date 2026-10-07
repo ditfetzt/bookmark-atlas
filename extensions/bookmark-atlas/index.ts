@@ -91,6 +91,8 @@ const EXCERPT_ROWS = 5;
 // returns exactly that many lines, and the kitty/iTerm sequence draws all of
 // them, so a larger image would be painted over the bottom border.
 const IMAGE_ROWS = 10;
+// How many decoded images the palette keeps in memory at once.
+const IMAGE_CACHE = 24;
 // The reading pane trades the list and its separator for more text, so the
 // overlay keeps the same height. The image keeps its rows in both views.
 const READING_ROWS = LIST_ROWS + 1 + EXCERPT_ROWS;
@@ -685,6 +687,10 @@ export class BookmarkPalette implements Component, Focusable {
 			}
 		}
 		this.images.set(bookmark.id, image);
+		// An Image keeps its base64 and its rendered rows, so caching every one you
+		// scroll past is megabytes each. The list only ever needs the ones near the
+		// cursor, and a dropped entry costs one file read to rebuild.
+		if (this.images.size > IMAGE_CACHE) this.images.clear();
 		return image;
 	}
 
